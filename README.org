@@ -1,0 +1,10 @@
+#+TITLE: octox-net
+
+base: [[https://github.com/o8vm/octox][octox]]
+
+** Usage
+
+#+begin_src bash
+make build
+make run
+#+end_src
