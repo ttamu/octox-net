@@ -6,17 +6,19 @@ use std::{
 };
 
 fn main() {
-    let root_out_dir = PathBuf::from(std::env::var("ROOT_OUT_DIR").unwrap());
+    if let Ok(root_out_dir) = std::env::var("ROOT_OUT_DIR") {
+        let root_out_dir = PathBuf::from(root_out_dir);
 
-    // copy etc/_* to root_out_dir/etc
-    let src_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("etc");
-    let dst_dir = root_out_dir.join("etc");
-    copy_files(&src_dir, &dst_dir, Some("_")).expect("failed to copy user etc");
+        // copy etc/_* to root_out_dir/etc
+        let src_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("etc");
+        let dst_dir = root_out_dir.join("etc");
+        copy_files(&src_dir, &dst_dir, Some("_")).expect("failed to copy user etc");
 
-    // copy lib/_* to root_out_dir/lib
-    let src_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("lib");
-    let dst_dir = root_out_dir.join("lib");
-    copy_files(&src_dir, &dst_dir, Some("_")).expect("failed to copy user etc");
+        // copy lib/_* to root_out_dir/lib
+        let src_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("lib");
+        let dst_dir = root_out_dir.join("lib");
+        copy_files(&src_dir, &dst_dir, Some("_")).expect("failed to copy user etc");
+    }
 
     // build syscall interface file usys.rs
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
