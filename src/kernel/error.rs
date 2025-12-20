@@ -35,6 +35,18 @@ pub enum Error {
     Utf8Error = -28,
     WriteZero = -29,
     NotConnected = -30,
+    DeviceNotFound = -31,
+    ProtocolNotFound = -32,
+    PacketTooShort = -33,
+    InvalidVersion = -34,
+    InvalidHeaderLen = -35,
+    ChecksumError = -36,
+    PacketTruncated = -37,
+    UnsupportedProtocol = -38,
+    UnsupportedDevice = -39,
+    PacketTooLarge = -40,
+    InvalidAddress = -41,
+    Timeout = -42,
 }
 
 impl Error {
@@ -71,6 +83,18 @@ impl Error {
             WriteZero => "write zero",
             NotConnected => "not connected",
             Uncategorized => "uncategorized error",
+            DeviceNotFound => "device not found",
+            ProtocolNotFound => "protocol not found",
+            PacketTooShort => "packet too short",
+            InvalidVersion => "invalid version",
+            InvalidHeaderLen => "invalid header length",
+            ChecksumError => "checksum error",
+            PacketTruncated => "packet truncated",
+            UnsupportedProtocol => "unsupported protocol",
+            UnsupportedDevice => "unsupported device",
+            PacketTooLarge => "packet too large",
+            InvalidAddress => "invalid address",
+            Timeout => "timeout",
         }
     }
     pub fn from_isize(code: isize) -> Self {
@@ -105,6 +129,18 @@ impl Error {
             -28 => Utf8Error,
             -29 => WriteZero,
             -30 => NotConnected,
+            -31 => DeviceNotFound,
+            -32 => ProtocolNotFound,
+            -33 => PacketTooShort,
+            -34 => InvalidVersion,
+            -35 => InvalidHeaderLen,
+            -36 => ChecksumError,
+            -37 => PacketTruncated,
+            -38 => UnsupportedProtocol,
+            -39 => UnsupportedDevice,
+            -40 => PacketTooLarge,
+            -41 => InvalidAddress,
+            -42 => Timeout,
             _ => Uncategorized,
         }
     }
