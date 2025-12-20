@@ -1,5 +1,8 @@
 use std::{
-    fs, io::Result, path::{Path, PathBuf}, process::Command
+    fs,
+    io::Result,
+    path::{Path, PathBuf},
+    process::Command,
 };
 
 fn main() {

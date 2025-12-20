@@ -1,9 +1,9 @@
 use kernel::{defs::*, fs::*, param::*, stat::*};
-use std::{env, io};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process;
+use std::{env, io};
 
 const NINODES: usize = 200;
 
@@ -301,13 +301,18 @@ fn main() -> std::io::Result<()> {
             .unwrap()
             .trim_start_matches("_");
         assert!(shortname.len() < 14);
-        let parent_ino = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).map(|parent_name| match parent_name {
-            "bin" if shortname.contains("init") => rootino,
-            "bin" => binino,
-            "lib" => libino,
-            "etc" => etcino,
-            _ => rootino,
-        }).unwrap_or(rootino);
+        let parent_ino = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|parent_name| match parent_name {
+                "bin" if shortname.contains("init") => rootino,
+                "bin" => binino,
+                "lib" => libino,
+                "etc" => etcino,
+                _ => rootino,
+            })
+            .unwrap_or(rootino);
 
         let mut fd = File::open(path)?;
 
