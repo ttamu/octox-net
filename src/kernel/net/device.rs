@@ -168,7 +168,7 @@ impl Clone for NetDevice {
     }
 }
 
-static NET_DEVICES: Mutex<Vec<NetDevice>> = Mutex::new(Vec::new(), "net_devices");
+pub(crate) static NET_DEVICES: Mutex<Vec<NetDevice>> = Mutex::new(Vec::new(), "net_devices");
 
 pub fn net_device_register(device: NetDevice) -> Result<()> {
     let mut list = NET_DEVICES.lock();

@@ -34,8 +34,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
 
     let payload = &data[EthHeader::LEN..];
     match etype {
-        // TODO: ARP実装時に有効化
-        // ETHERTYPE_ARP => crate::net::arp::input(dev, payload),
+        ETHERTYPE_ARP => crate::net::arp::input(dev, payload),
         ETHERTYPE_IPV4 => net_protocol_handler(dev, ProtocolType::IP, payload),
         _ => {
             crate::println!("[ether] unsupported ethertype: 0x{:04x}", etype);
