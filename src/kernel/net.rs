@@ -1,5 +1,6 @@
 pub mod device;
 pub mod driver;
+pub mod ethernet;
 pub mod icmp;
 pub mod interface;
 pub mod ip;

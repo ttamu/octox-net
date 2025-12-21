@@ -1,6 +1,7 @@
 use crate::{
     kernelvec::kernelvec,
-    memlayout::{STACK_PAGE_NUM, TRAMPOLINE, UART0_IRQ, VIRTIO0_IRQ},
+    memlayout::{STACK_PAGE_NUM, TRAMPOLINE, UART0_IRQ, VIRTIO0_IRQ, VIRTIO1_IRQ},
+    net::driver::virtio_net,
     plic,
     proc::{self, Cpus, ProcState},
     riscv::{
@@ -232,6 +233,7 @@ fn devintr(intr: Interrupt) -> Option<Intr> {
                 match irq {
                     UART0_IRQ => UART.intr(),
                     VIRTIO0_IRQ => DISK.intr(),
+                    VIRTIO1_IRQ => virtio_net::intr(),
                     _ => println!("unexpected interrupt irq={}", irq),
                 }
                 // the PLIC allows each device to raise at most one

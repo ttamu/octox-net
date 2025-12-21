@@ -27,6 +27,10 @@ pub const UART0_IRQ: u32 = 10;
 pub const VIRTIO0: usize = 0x1000_1000;
 pub const VIRTIO0_IRQ: u32 = 1;
 
+// virtio mmio net interface
+pub const VIRTIO1: usize = 0x1000_2000;
+pub const VIRTIO1_IRQ: u32 = 2;
+
 // core local interrupter (CLINT), which contains the timer
 pub const CLINT: usize = 0x2000000;
 pub const fn clint_mtimecmp(hartid: usize) -> usize {

@@ -1,7 +1,7 @@
 use crate::defs::AsBytes;
 use crate::error::{Error::*, Result};
 use crate::memlayout::{
-    KERNBASE, PHYSTOP, PLIC, STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME, UART0, VIRTIO0,
+    KERNBASE, PHYSTOP, PLIC, STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME, UART0, VIRTIO0, VIRTIO1,
 };
 use crate::proc::PROCS;
 use crate::riscv::{pgroundup, pteflags::*, registers::satp, sfence_vma, PGSHIFT, PGSIZE};
@@ -660,6 +660,8 @@ impl Kvm {
 
         // virtio mmio disk interface
         self.map(VIRTIO0.into(), VIRTIO0.into(), PGSIZE, PTE_R | PTE_W);
+        // virtio mmio net interface
+        self.map(VIRTIO1.into(), VIRTIO1.into(), PGSIZE, PTE_R | PTE_W);
 
         // PLIC
         self.map(PLIC.into(), PLIC.into(), 0x0040_0000, PTE_R | PTE_W);

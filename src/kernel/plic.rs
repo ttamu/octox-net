@@ -1,5 +1,8 @@
 use crate::{
-    memlayout::{PLIC_PRIORITY, PLIC_SCLAIM, PLIC_SENABLE, PLIC_SPRIORITY, UART0_IRQ, VIRTIO0_IRQ},
+    memlayout::{
+        PLIC_PRIORITY, PLIC_SCLAIM, PLIC_SENABLE, PLIC_SPRIORITY, UART0_IRQ, VIRTIO0_IRQ,
+        VIRTIO1_IRQ,
+    },
     proc::Cpus,
 };
 
@@ -10,6 +13,7 @@ pub fn init() {
     unsafe {
         priority.add(UART0_IRQ as usize).write_volatile(1);
         priority.add(VIRTIO0_IRQ as usize).write_volatile(1);
+        priority.add(VIRTIO1_IRQ as usize).write_volatile(1);
     }
 }
 
@@ -19,7 +23,7 @@ pub fn inithart() {
 
         // set uart's enable bit for this hart's S-mode.
         let senable = PLIC_SENABLE(hart) as *mut u32;
-        senable.write_volatile((1 << UART0_IRQ) | (1 << VIRTIO0_IRQ));
+        senable.write_volatile((1 << UART0_IRQ) | (1 << VIRTIO0_IRQ) | (1 << VIRTIO1_IRQ));
 
         // set this hart's S-mode priority threshold to 0.
         let spriority = PLIC_SPRIORITY(hart) as *mut u32;

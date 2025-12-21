@@ -199,8 +199,7 @@ pub fn icmp_recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
     let tick_ms = crate::param::TICK_MS as u64;
     let timeout_ticks = (timeout_ms + tick_ms - 1) / tick_ms;
     loop {
-        // TODO: virtio-net実装後にコメントアウトを外す
-        // crate::net::driver::virtio_net::poll_rx();
+        crate::net::driver::virtio_net::poll_rx();
         if let Some(reply) = {
             let mut q = ICMP_REPLY_QUEUE.lock();
             if let Some(pos) = q.iter().position(|r| r.id == id) {
