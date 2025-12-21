@@ -11,3 +11,6 @@ pub const LOGSIZE: usize = MAXOPBLOCKS * 3; // max data blocks in on-disk log
 pub const NBUF: usize = MAXOPBLOCKS * 3; // size of disk block cache
 pub const FSSIZE: usize = 200000; // size of file system in blocks
 pub const MAXPATH: usize = 128; // maximum file path name
+pub const TIMEBASE_FREQ: usize = 10_000_000; // timer base frequency (10MHz)
+pub const TICK_HZ: usize = 10; // timer interrupt frequency (10Hz)
+pub const TICK_MS: usize = 1000 / TICK_HZ; // milliseconds per tick (100ms)
