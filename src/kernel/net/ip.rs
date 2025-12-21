@@ -4,8 +4,10 @@ use super::{
 };
 use crate::{
     error::{Error, Result},
-    net::device::NetDevice,
-    net::icmp
+    net::{
+        device::{net_device_by_name, NetDevice},
+        icmp,
+    },
 };
 extern crate alloc;
 use core::mem::size_of;
@@ -141,7 +143,50 @@ pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> 
         return ip_output(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
     }
 
-    // TODO: router実装時に詳細を実装
+    if let Some(route) = crate::net::route::lookup(dst) {
+        let dev = net_device_by_name(route.dev).ok_or(Error::DeviceNotFound)?;
+        let src = dev
+            .interfaces
+            .iter()
+            .find(|i| (dst.0 & i.netmask.0) == (i.addr.0 & i.netmask.0))
+            .map(|i| i.addr)
+            .unwrap_or_else(|| {
+                dev.interfaces
+                    .first()
+                    .map(|i| i.addr)
+                    .unwrap_or(IpAddr::LOOPBACK)
+            });
+
+        let next_hop = route.gateway.unwrap_or(dst);
+        let mac = crate::net::arp::resolve(dev.name(), next_hop, src, crate::param::TICK_HZ)
+            .or_else(|_| Err(Error::Timeout))?;
+        let mut dev_clone = dev.clone();
+        let total_len = core::mem::size_of::<super::ip::IpHeader>() + payload.len();
+        let mut ip_packet = alloc::vec![0u8; total_len];
+        {
+            let hdr = unsafe { &mut *(ip_packet.as_mut_ptr() as *mut super::ip::IpHeader) };
+            hdr.version_ihl = 0x45;
+            hdr.tos = 0;
+            hdr.total_len = (total_len as u16).to_be();
+            hdr.id = 0;
+            hdr.flags_offset = 0;
+            hdr.ttl = 64;
+            hdr.protocol = protocol;
+            hdr.checksum = 0;
+            hdr.src = src.0.to_be();
+            hdr.dst = dst.0.to_be();
+            hdr.checksum =
+                super::util::checksum(&ip_packet[..core::mem::size_of::<super::ip::IpHeader>()])
+                    .to_be();
+        }
+        ip_packet[core::mem::size_of::<super::ip::IpHeader>()..].copy_from_slice(payload);
+        return crate::net::ethernet::output(
+            &mut dev_clone,
+            mac,
+            crate::net::ethernet::ETHERTYPE_IPV4,
+            &ip_packet,
+        );
+    }
 
     Err(Error::NoSuchNode)
 }

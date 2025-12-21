@@ -395,13 +395,12 @@ pub fn setup_iface() -> Result<()> {
         IpAddr::new(192, 0, 2, 2),
         IpAddr::new(255, 255, 255, 0),
     )?;
-    // TODO: route実装時にコメントアウトを外す
-    // crate::net::route::add_route(crate::net::route::Route {
-    //     dest: IpAddr::new(0, 0, 0, 0),
-    //     mask: IpAddr::new(0, 0, 0, 0),
-    //     gateway: Some(IpAddr::new(192, 0, 2, 1)),
-    //     dev: "eth0",
-    // })?;
+    crate::net::route::add_route(crate::net::route::Route {
+        dest: IpAddr::new(0, 0, 0, 0),
+        mask: IpAddr::new(0, 0, 0, 0),
+        gateway: Some(IpAddr::new(192, 0, 2, 1)),
+        dev: "eth0",
+    })?;
     Ok(())
 }
 
