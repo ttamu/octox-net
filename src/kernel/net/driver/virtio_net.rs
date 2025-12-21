@@ -419,8 +419,7 @@ pub fn poll_rx() {
         drop(guard);
         for p in pkts {
             let dev = crate::net::device::net_device_by_name("eth0").unwrap();
-            // TODO: ethernet 実装時にコメントアウトを外す
-            // let _ = ethernet::input(&dev, p.as_slice());
+            let _ = ethernet::input(&dev, p.as_slice());
         }
     }
 }

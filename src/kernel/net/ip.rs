@@ -5,6 +5,7 @@ use super::{
 use crate::{
     error::{Error, Result},
     net::device::NetDevice,
+    net::icmp
 };
 extern crate alloc;
 use core::mem::size_of;
@@ -90,9 +91,9 @@ pub fn ip_input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
         header.protocol
     );
 
-    // TODO: Implement ICMP
-    let _payload = &data[hlen..total_len];
+    let payload = &data[hlen..total_len];
     match header.protocol {
+        IpHeader::ICMP => icmp::icmp_input(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }
 }
@@ -140,7 +141,7 @@ pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> 
         return ip_output(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
     }
 
-    // TODO: Implement routing table lookup
+    // TODO: router実装時に詳細を実装
 
     Err(Error::NoSuchNode)
 }
