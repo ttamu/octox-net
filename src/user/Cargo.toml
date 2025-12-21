@@ -82,6 +82,10 @@ path = "bin/touch.rs"
 name = "_jell"
 path = "bin/jell.rs"
 
+[[bin]]
+name = "_ping"
+path = "bin/ping.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

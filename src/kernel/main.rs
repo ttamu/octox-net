@@ -5,7 +5,7 @@ extern crate alloc;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::{
-    bio, console, kalloc, kmain, null, plic, println,
+    bio, console, kalloc, kmain, net, null, plic, println,
     proc::{self, scheduler, user_init, Cpus},
     trap, virtio_disk, vm,
 };
@@ -32,6 +32,7 @@ extern "C" fn main() -> ! {
         plic::inithart(); // ask PLIC for device interrupts
         bio::init(); // buffer cache
         virtio_disk::init(); // emulated hard disk
+        net::init(); // network stack
         user_init(initcode);
         STARTED.store(true, Ordering::SeqCst);
     } else {

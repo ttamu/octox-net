@@ -54,6 +54,16 @@ fn lang_start<T: Termination + 'static>(
     sys::exit(xstatus)
 }
 
+pub fn icmp_echo_request(dst: &str, id: u16, seq: u16, payload: &[u8]) -> sys::Result<()> {
+    sys::icmpechorequest(dst.as_bytes(), id, seq, payload)?;
+    Ok(())
+}
+
+pub fn icmp_recv_reply(id: u16, timeout_ms: u64, buf: &mut [u8]) -> sys::Result<usize> {
+    let n = sys::icmprecvreply(id, timeout_ms, buf)?;
+    Ok(n)
+}
+
 pub enum ExitCode {
     SUCCESS = 0x0isize,
     FAILURE = 0x1isize,

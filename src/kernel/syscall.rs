@@ -52,6 +52,9 @@ pub enum SysCalls {
     Close = 21,
     Dup2 = 22,
     Fcntl = 23,
+    IcmpEchoRequest = 24,
+    IcmpRecvReply = 25,
+    Clocktime = 26,
     Invalid = 0,
 }
 
@@ -105,6 +108,15 @@ impl SysCalls {
         (Fn::U(Self::close), "(fd: usize)"),               // Release open file fd.
         (Fn::I(Self::dup2), "(src: usize, dst: usize)"),   //
         (Fn::I(Self::fcntl), "(fd: usize, cmd: FcntlCmd)"), //
+        (
+            Fn::I(Self::icmpechorequest),
+            "(dst: &[u8], id: u16, seq: u16, payload: &[u8])",
+        ),
+        (
+            Fn::I(Self::icmprecvreply),
+            "(id: u16, timeout_ms: u64, buf: &mut [u8])",
+        ),
+        (Fn::I(Self::clocktime), "()"),
     ];
     pub fn invalid() -> ! {
         unimplemented!()
@@ -396,6 +408,18 @@ impl SysCalls {
             Ok(*TICKS.lock())
         }
     }
+    pub fn clocktime() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            use crate::memlayout::CLINT_MTIME;
+            use crate::param::TIMEBASE_FREQ;
+            let cycles = unsafe { (CLINT_MTIME as *const u64).read_volatile() } as u128;
+            let micros = cycles.saturating_mul(1_000_000u128) / TIMEBASE_FREQ as u128;
+            Ok(micros as usize)
+        }
+    }
 }
 
 // System Calls related to File operations
@@ -667,6 +691,46 @@ impl SysCalls {
             f.do_fcntl(cmd)
         }
     }
+
+    pub fn icmpechorequest() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            use crate::net::ip::parse_ip_str;
+            let mut sbinfo: SBInfo = Default::default();
+            let sbinfo = SBInfo::from_arg(0, &mut sbinfo)?;
+            let mut buf = alloc::vec![0u8; sbinfo.len];
+            crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
+            let s = core::str::from_utf8(&buf).or(Err(Utf8Error))?;
+            let s = s.trim_end_matches(char::from(0));
+            let dst = parse_ip_str(s)?;
+            let id = argraw(1) as u16;
+            let seq = argraw(2) as u16;
+            let mut sbinfo_payload: SBInfo = Default::default();
+            let sbinfo_payload = SBInfo::from_arg(3, &mut sbinfo_payload)?;
+            let mut payload = alloc::vec![0u8; sbinfo_payload.len];
+            crate::proc::either_copyin(&mut payload[..], sbinfo_payload.ptr.into())?;
+            crate::net::icmp::icmp_echo_request(dst, id, seq, &payload)?;
+            Ok(0)
+        }
+    }
+
+    pub fn icmprecvreply() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            let mut sbinfo: SBInfo = Default::default();
+            let id = argraw(0) as u16;
+            let timeout_ms = argraw(1) as u64;
+            let sbinfo = SBInfo::from_arg(2, &mut sbinfo)?;
+            let reply = crate::net::icmp::icmp_recv_reply(id, timeout_ms)?;
+            let copy_len = core::cmp::min(reply.payload.len(), sbinfo.len);
+            crate::proc::either_copyout(sbinfo.ptr.into(), &reply.payload[..copy_len])?;
+            Ok(copy_len)
+        }
+    }
 }
 
 impl SysCalls {
@@ -695,6 +759,9 @@ impl SysCalls {
             21 => Self::Close,
             22 => Self::Dup2,
             23 => Self::Fcntl,
+            24 => Self::IcmpEchoRequest,
+            25 => Self::IcmpRecvReply,
+            26 => Self::Clocktime,
             _ => Self::Invalid,
         }
     }
