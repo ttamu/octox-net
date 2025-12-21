@@ -25,6 +25,8 @@ pub mod memlayout;
 #[cfg(all(target_os = "none", feature = "kernel"))]
 pub mod mpmc;
 #[cfg(all(target_os = "none", feature = "kernel"))]
+pub mod net;
+#[cfg(all(target_os = "none", feature = "kernel"))]
 pub mod null;
 pub mod param;
 #[cfg(all(target_os = "none", feature = "kernel"))]
