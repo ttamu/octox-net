@@ -2,10 +2,7 @@ use super::{
     ip::IpAddr,
     udp::{self, UdpEndpoint},
 };
-use crate::{
-    error::{Error, Result},
-    proc::yielding,
-};
+use crate::error::{Error, Result};
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
 
@@ -298,7 +295,11 @@ pub fn dns_resolve(domain: &str) -> Result<IpAddr> {
                 }
             }
             Err(Error::WouldBlock) => {
-                yielding();
+                let mut ticks = crate::trap::TICKS.lock();
+                let ticks0 = *ticks;
+                while *ticks - ticks0 < 1 {
+                    ticks = crate::proc::sleep(&(*ticks) as *const _ as usize, ticks);
+                }
             }
             Err(e) => {
                 udp::udp_pcb_release(sockfd)?;

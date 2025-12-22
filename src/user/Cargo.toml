@@ -86,6 +86,10 @@ path = "bin/jell.rs"
 name = "_ping"
 path = "bin/ping.rs"
 
+[[bin]]
+name = "_nslookup"
+path = "bin/nslookup.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

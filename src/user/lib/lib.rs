@@ -64,6 +64,12 @@ pub fn icmp_recv_reply(id: u16, timeout_ms: u64, buf: &mut [u8]) -> sys::Result<
     Ok(n)
 }
 
+pub fn dns_resolve(domain: &str) -> sys::Result<u32> {
+    let mut addr: u32 = 0;
+    sys::dnsresolve(domain.as_bytes(), &mut addr)?;
+    Ok(addr)
+}
+
 pub enum ExitCode {
     SUCCESS = 0x0isize,
     FAILURE = 0x1isize,

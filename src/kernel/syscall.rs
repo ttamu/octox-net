@@ -55,6 +55,7 @@ pub enum SysCalls {
     IcmpEchoRequest = 24,
     IcmpRecvReply = 25,
     Clocktime = 26,
+    DnsResolve = 27,
     Invalid = 0,
 }
 
@@ -117,6 +118,7 @@ impl SysCalls {
             "(id: u16, timeout_ms: u64, buf: &mut [u8])",
         ),
         (Fn::I(Self::clocktime), "()"),
+        (Fn::I(Self::dnsresolve), "(domain: &[u8], addr_out: &mut u32)"),
     ];
     pub fn invalid() -> ! {
         unimplemented!()
@@ -731,6 +733,27 @@ impl SysCalls {
             Ok(copy_len)
         }
     }
+
+    pub fn dnsresolve() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        unsafe {
+            let mut sbinfo: SBInfo = Default::default();
+            let sbinfo = SBInfo::from_arg(0, &mut sbinfo)?;
+            let addr_ptr: UVAddr = argraw(1).into();
+
+            let mut buf = alloc::vec![0u8; sbinfo.len];
+            crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
+            let domain = core::str::from_utf8(&buf).or(Err(Utf8Error))?;
+
+            let addr = crate::net::dns::dns_resolve(domain)?;
+
+            crate::proc::either_copyout(addr_ptr.into(), &addr.0.to_ne_bytes())?;
+
+            Ok(0)
+        }
+    }
 }
 
 impl SysCalls {
@@ -762,6 +785,7 @@ impl SysCalls {
             24 => Self::IcmpEchoRequest,
             25 => Self::IcmpRecvReply,
             26 => Self::Clocktime,
+            27 => Self::DnsResolve,
             _ => Self::Invalid,
         }
     }
