@@ -159,7 +159,8 @@ pub unsafe extern "C" fn usertrap_ret() -> ! {
     // switches to the user page table, restores user registers,
     // and switches to user mode with sret.
 
-    let fn_0: usize = TRAMPOLINE + (userret as *const () as usize - trampoline as *const () as usize);
+    let fn_0: usize =
+        TRAMPOLINE + (userret as *const () as usize - trampoline as *const () as usize);
     let fn_0: extern "C" fn(usize) -> ! = core::mem::transmute(fn_0);
     fn_0(satp)
 }

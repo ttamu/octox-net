@@ -1,5 +1,6 @@
 pub mod arp;
 pub mod device;
+pub mod dns;
 pub mod driver;
 pub mod ethernet;
 pub mod icmp;
