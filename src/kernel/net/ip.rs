@@ -6,7 +6,7 @@ use crate::{
     error::{Error, Result},
     net::{
         device::{net_device_by_name, NetDevice},
-        icmp,
+        icmp, udp,
     },
 };
 extern crate alloc;
@@ -96,6 +96,7 @@ pub fn ip_input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let payload = &data[hlen..total_len];
     match header.protocol {
         IpHeader::ICMP => icmp::icmp_input(src, dst, payload),
+        IpHeader::UDP => udp::udp_input(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }
 }
