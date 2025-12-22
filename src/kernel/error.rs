@@ -47,6 +47,13 @@ pub enum Error {
     PacketTooLarge = -40,
     InvalidAddress = -41,
     Timeout = -42,
+    NoPcbAvailable = -43,
+    InvalidPcbIndex = -44,
+    InvalidPcbState = -45,
+    PortInUse = -46,
+    NoPortAvailable = -47,
+    InvalidLength = -48,
+    NoMatchingPcb = -49,
 }
 
 impl Error {
@@ -82,7 +89,6 @@ impl Error {
             Utf8Error => "slice is not utf8",
             WriteZero => "write zero",
             NotConnected => "not connected",
-            Uncategorized => "uncategorized error",
             DeviceNotFound => "device not found",
             ProtocolNotFound => "protocol not found",
             PacketTooShort => "packet too short",
@@ -95,6 +101,14 @@ impl Error {
             PacketTooLarge => "packet too large",
             InvalidAddress => "invalid address",
             Timeout => "timeout",
+            NoPcbAvailable => "no PCB available",
+            InvalidPcbIndex => "invalid PCB index",
+            InvalidPcbState => "invalid PCB state",
+            PortInUse => "port in use",
+            NoPortAvailable => "no port available",
+            InvalidLength => "invalid length",
+            NoMatchingPcb => "no matching PCB",
+            Uncategorized => "uncategorized error",
         }
     }
     pub fn from_isize(code: isize) -> Self {
@@ -141,6 +155,13 @@ impl Error {
             -40 => PacketTooLarge,
             -41 => InvalidAddress,
             -42 => Timeout,
+            -43 => NoPcbAvailable,
+            -44 => InvalidPcbIndex,
+            -45 => InvalidPcbState,
+            -46 => PortInUse,
+            -47 => NoPortAvailable,
+            -48 => InvalidLength,
+            -49 => NoMatchingPcb,
             _ => Uncategorized,
         }
     }
