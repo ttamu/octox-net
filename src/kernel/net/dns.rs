@@ -4,7 +4,7 @@ use super::{
 };
 use crate::error::{Error, Result};
 extern crate alloc;
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 const DNS_TYPE_A: u16 = 1; // IPv4 address
 const DNS_CLASS_IN: u16 = 1; // Internet class
@@ -43,64 +43,6 @@ fn encode_domain_name(domain: &str, buf: &mut Vec<u8>) {
         buf.extend_from_slice(label.as_bytes());
     }
     buf.push(0);
-}
-
-fn decode_domain_name(
-    data: &[u8],
-    mut offset: usize,
-    _original_data: &[u8],
-) -> Result<(String, usize)> {
-    let mut name = String::new();
-    let mut jumped = false;
-    let mut jump_offset = 0;
-    let mut iterations = 0;
-    const MAX_ITERATIONS: usize = 127;
-
-    loop {
-        iterations += 1;
-        if iterations > MAX_ITERATIONS {
-            return Err(Error::InvalidLength);
-        }
-
-        if offset >= data.len() {
-            return Err(Error::PacketTooShort);
-        }
-
-        let len = data[offset];
-
-        if len & 0xC0 == 0xC0 {
-            if offset + 1 >= data.len() {
-                return Err(Error::PacketTooShort);
-            }
-
-            if !jumped {
-                jump_offset = offset + 2;
-            }
-
-            let pointer = (((len & 0x3F) as usize) << 8) | (data[offset + 1] as usize);
-            offset = pointer;
-            jumped = true;
-            continue;
-        }
-        offset += 1;
-
-        if len == 0 {
-            break;
-        }
-        if !name.is_empty() {
-            name.push('.');
-        }
-        if offset + len as usize > data.len() {
-            return Err(Error::PacketTooShort);
-        }
-
-        for i in 0..len as usize {
-            name.push(data[offset + i] as char);
-        }
-        offset += len as usize;
-    }
-
-    Ok((name, if jumped { jump_offset } else { offset }))
 }
 
 fn build_dns_query(domain: &str, id: u16) -> Vec<u8> {

@@ -61,7 +61,6 @@ impl UdpEndpoint {
 enum UdpState {
     Free,
     Open,
-    Closing,
 }
 
 #[derive(Debug, Clone)]
@@ -82,21 +81,6 @@ impl UdpPcb {
             local: UdpEndpoint::new(IpAddr(0), 0),
             recv_queue: VecDeque::new(),
         }
-    }
-
-    fn is_free(&self) -> bool {
-        self.state == UdpState::Free
-    }
-
-    fn is_match(&self, dst: IpAddr, dst_port: u16) -> bool {
-        if self.state != UdpState::Open {
-            return false;
-        }
-        if self.local.port != dst_port {
-            return false;
-        }
-
-        self.local.addr.0 == 0 || self.local.addr.0 == dst.0
     }
 }
 

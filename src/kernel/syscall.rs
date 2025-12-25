@@ -738,7 +738,7 @@ impl SysCalls {
         #[cfg(not(all(target_os = "none", feature = "kernel")))]
         return Ok(0);
         #[cfg(all(target_os = "none", feature = "kernel"))]
-        unsafe {
+        {
             let mut sbinfo: SBInfo = Default::default();
             let sbinfo = SBInfo::from_arg(0, &mut sbinfo)?;
             let addr_ptr: UVAddr = argraw(1).into();
