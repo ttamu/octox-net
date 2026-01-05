@@ -118,7 +118,10 @@ impl SysCalls {
             "(id: u16, timeout_ms: u64, buf: &mut [u8])",
         ),
         (Fn::I(Self::clocktime), "()"),
-        (Fn::I(Self::dnsresolve), "(domain: &[u8], addr_out: &mut u32)"),
+        (
+            Fn::I(Self::dnsresolve),
+            "(domain: &[u8], addr_out: &mut u32)",
+        ),
     ];
     pub fn invalid() -> ! {
         unimplemented!()
@@ -713,7 +716,7 @@ impl SysCalls {
             let sbinfo_payload = SBInfo::from_arg(3, &mut sbinfo_payload)?;
             let mut payload = alloc::vec![0u8; sbinfo_payload.len];
             crate::proc::either_copyin(&mut payload[..], sbinfo_payload.ptr.into())?;
-            crate::net::icmp::icmp_echo_request(dst, id, seq, &payload)?;
+            crate::net::icmp::echo_request(dst, id, seq, &payload)?;
             Ok(0)
         }
     }
@@ -727,7 +730,7 @@ impl SysCalls {
             let id = argraw(0) as u16;
             let timeout_ms = argraw(1) as u64;
             let sbinfo = SBInfo::from_arg(2, &mut sbinfo)?;
-            let reply = crate::net::icmp::icmp_recv_reply(id, timeout_ms)?;
+            let reply = crate::net::icmp::recv_reply(id, timeout_ms)?;
             let copy_len = core::cmp::min(reply.payload.len(), sbinfo.len);
             crate::proc::either_copyout(sbinfo.ptr.into(), &reply.payload[..copy_len])?;
             Ok(copy_len)
@@ -747,7 +750,7 @@ impl SysCalls {
             crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
             let domain = core::str::from_utf8(&buf).or(Err(Utf8Error))?;
 
-            let addr = crate::net::dns::dns_resolve(domain)?;
+            let addr = crate::net::dns::resolve(domain)?;
 
             crate::proc::either_copyout(addr_ptr.into(), &addr.0.to_ne_bytes())?;
 

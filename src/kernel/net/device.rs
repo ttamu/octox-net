@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, Result},
-    net::interface::NetInterface,
+    net::{ethernet::MacAddr, interface::NetInterface},
     spinlock::Mutex,
 };
 use alloc::{string::String, vec::Vec};
@@ -67,7 +67,7 @@ pub struct NetDevice {
     flags: NetDeviceFlags,
     pub header_len: u16,
     pub addr_len: u16,
-    pub hw_addr: [u8; 6],
+    pub hw_addr: MacAddr,
     ops: NetDeviceOps,
     pub interfaces: Vec<NetInterface>,
 }
@@ -79,7 +79,7 @@ impl NetDevice {
         flags: NetDeviceFlags,
         header_len: u16,
         addr_len: u16,
-        hw_addr: [u8; 6],
+        hw_addr: MacAddr,
         ops: NetDeviceOps,
     ) -> Self {
         let mut name_buf = [0u8; 16];

@@ -2,9 +2,9 @@ extern crate alloc;
 use crate::condvar::Condvar;
 use crate::error::{Error, Result};
 use crate::net::device::{NetDevice, NetDeviceFlags};
-use crate::net::ethernet::{output as eth_output, ETHERTYPE_ARP};
+use crate::net::ethernet::{output as eth_output, MacAddr, ETHERTYPE_ARP};
 use crate::net::ip::IpAddr;
-use crate::net::util::{hton16, ntoh16};
+use crate::net::util::{hton16, ntoh16, parse_header, parse_header_mut};
 use crate::spinlock::Mutex;
 use alloc::vec::Vec;
 
@@ -31,14 +31,14 @@ struct ArpPacket {
 #[derive(Clone, Copy, Debug)]
 struct ArpEntry {
     ip: IpAddr,
-    mac: [u8; 6],
+    mac: MacAddr,
     valid: bool,
 }
 
 static ARP_TABLE: Mutex<Vec<ArpEntry>> = Mutex::new(Vec::new(), "arp_table");
 static ARP_CV: Condvar = Condvar::new();
 
-fn lookup(ip: IpAddr) -> Option<[u8; 6]> {
+fn lookup(ip: IpAddr) -> Option<MacAddr> {
     let table = ARP_TABLE.lock();
     table
         .iter()
@@ -46,7 +46,7 @@ fn lookup(ip: IpAddr) -> Option<[u8; 6]> {
         .map(|e| e.mac)
 }
 
-fn insert(ip: IpAddr, mac: [u8; 6]) {
+fn insert(ip: IpAddr, mac: MacAddr) {
     {
         let mut table = ARP_TABLE.lock();
         if let Some(e) = table.iter_mut().find(|e| e.ip.0 == ip.0) {
@@ -60,15 +60,12 @@ fn insert(ip: IpAddr, mac: [u8; 6]) {
             });
         }
     }
-    crate::println!("[arp] insert {:?} -> {:02x?}", ip.to_bytes(), mac);
+    crate::println!("[arp] insert {:?} -> {}", ip.to_bytes(), mac);
     ARP_CV.notify_all();
 }
 
 pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
-    if data.len() < core::mem::size_of::<ArpPacket>() {
-        return Err(Error::PacketTooShort);
-    }
-    let pkt = unsafe { &*(data.as_ptr() as *const ArpPacket) };
+    let pkt = parse_header::<ArpPacket>(data)?;
     if ntoh16(pkt.htype) != ARP_HTYPE_ETHERNET
         || ntoh16(pkt.ptype) != ARP_PTYPE_IPV4
         || pkt.hlen != ARP_HLEN_ETH
@@ -78,7 +75,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
     }
     let oper = ntoh16(pkt.oper);
     let sender_ip = IpAddr(u32::from_be(pkt.spa));
-    let sender_mac = pkt.sha;
+    let sender_mac = MacAddr(pkt.sha);
     let target_ip = IpAddr(u32::from_be(pkt.tpa));
 
     crate::println!(
@@ -103,17 +100,17 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn send_reply(dev: &NetDevice, dst_mac: [u8; 6], dst_ip: IpAddr, src_ip: IpAddr) -> Result<()> {
+fn send_reply(dev: &NetDevice, dst_mac: MacAddr, dst_ip: IpAddr, src_ip: IpAddr) -> Result<()> {
     let mut buf = [0u8; core::mem::size_of::<ArpPacket>()];
-    let pkt = unsafe { &mut *(buf.as_mut_ptr() as *mut ArpPacket) };
+    let pkt = parse_header_mut::<ArpPacket>(&mut buf)?;
     pkt.htype = hton16(ARP_HTYPE_ETHERNET);
     pkt.ptype = hton16(ARP_PTYPE_IPV4);
     pkt.hlen = ARP_HLEN_ETH;
     pkt.plen = ARP_PLEN_IPV4;
     pkt.oper = hton16(ARP_OP_REPLY);
-    pkt.sha = dev.hw_addr;
+    pkt.sha = dev.hw_addr.0;
     pkt.spa = src_ip.0.to_be();
-    pkt.tha = dst_mac;
+    pkt.tha = dst_mac.0;
     pkt.tpa = dst_ip.0.to_be();
 
     let mut dev_clone = dev.clone();
@@ -122,18 +119,18 @@ fn send_reply(dev: &NetDevice, dst_mac: [u8; 6], dst_ip: IpAddr, src_ip: IpAddr)
 
 fn send_request(dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Result<()> {
     let mut buf = [0u8; core::mem::size_of::<ArpPacket>()];
-    let pkt = unsafe { &mut *(buf.as_mut_ptr() as *mut ArpPacket) };
+    let pkt = parse_header_mut::<ArpPacket>(&mut buf)?;
     pkt.htype = hton16(ARP_HTYPE_ETHERNET);
     pkt.ptype = hton16(ARP_PTYPE_IPV4);
     pkt.hlen = ARP_HLEN_ETH;
     pkt.plen = ARP_PLEN_IPV4;
     pkt.oper = hton16(ARP_OP_REQUEST);
-    pkt.sha = dev.hw_addr;
+    pkt.sha = dev.hw_addr.0;
     pkt.spa = sender_ip.0.to_be();
     pkt.tha = [0; 6];
     pkt.tpa = target_ip.0.to_be();
 
-    eth_output(dev, [0xFF; 6], ETHERTYPE_ARP, &buf)
+    eth_output(dev, MacAddr::BROADCAST, ETHERTYPE_ARP, &buf)
 }
 
 pub fn resolve(
@@ -141,7 +138,7 @@ pub fn resolve(
     target_ip: IpAddr,
     sender_ip: IpAddr,
     timeout_ticks: usize,
-) -> Result<[u8; 6]> {
+) -> Result<MacAddr> {
     if let Some(mac) = lookup(target_ip) {
         crate::println!("[arp] cache hit {:?}", mac);
         return Ok(mac);

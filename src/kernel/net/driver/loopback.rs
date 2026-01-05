@@ -44,7 +44,7 @@ pub fn loopback_init() -> Result<()> {
         NetDeviceFlags::LOOPBACK | NetDeviceFlags::BROADCAST,
         0,
         0,
-        [0; 6],
+        crate::net::ethernet::MacAddr([0; 6]),
         ops,
     );
     dev.open()?;

@@ -1,6 +1,6 @@
 use super::{
-    ip::{ip_output_route, IpAddr, IpHeader},
-    util::{checksum, hton16, hton32, ntoh16},
+    ip::{output_route, IpAddr, IpHeader},
+    util::{checksum, hton16, hton32, ntoh16, parse_header, parse_header_mut},
 };
 use crate::net::{device::net_device_by_name, route};
 use crate::{
@@ -89,7 +89,7 @@ static UDP_PCBS: Mutex<[UdpPcb; UDP_PCB_SIZE]> =
 
 static NEXT_EPHEMERAL_PORT: Mutex<u16> = Mutex::new(UDP_SOURCE_PORT_MIN, "udp_port");
 
-pub fn udp_pcb_alloc() -> Result<usize> {
+pub fn pcb_alloc() -> Result<usize> {
     let mut pcbs = UDP_PCBS.lock();
     for (i, pcb) in pcbs.iter_mut().enumerate() {
         if pcb.state == UdpState::Free {
@@ -101,7 +101,7 @@ pub fn udp_pcb_alloc() -> Result<usize> {
     Err(Error::NoPcbAvailable)
 }
 
-pub fn udp_pcb_release(index: usize) -> Result<()> {
+pub fn pcb_release(index: usize) -> Result<()> {
     let mut pcbs = UDP_PCBS.lock();
     if index >= UDP_PCB_SIZE {
         return Err(Error::InvalidPcbIndex);
@@ -115,7 +115,7 @@ pub fn udp_pcb_release(index: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn udp_bind(index: usize, mut local: UdpEndpoint) -> Result<()> {
+pub fn bind(index: usize, mut local: UdpEndpoint) -> Result<()> {
     let mut pcbs = UDP_PCBS.lock();
     if index >= UDP_PCB_SIZE {
         return Err(Error::InvalidPcbIndex);
@@ -188,7 +188,10 @@ fn udp_checksum(src: IpAddr, dst: IpAddr, data: &[u8]) -> u16 {
 }
 
 fn verify_udp_checksum(src: IpAddr, dst: IpAddr, data: &[u8]) -> bool {
-    let header = unsafe { &*(data.as_ptr() as *const UdpHeader) };
+    let header = match parse_header::<UdpHeader>(data) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
     if header.checksum == 0 {
         return true;
     }
@@ -218,12 +221,8 @@ fn select_src_addr(dst: IpAddr) -> Result<IpAddr> {
     Err(Error::NoSuchNode)
 }
 
-pub fn udp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
-    if data.len() < size_of::<UdpHeader>() {
-        return Err(Error::PacketTooShort);
-    }
-
-    let header = unsafe { &*(data.as_ptr() as *const UdpHeader) };
+pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+    let header = parse_header::<UdpHeader>(data)?;
     let src_port = ntoh16(header.src_port);
     let dst_port = ntoh16(header.dst_port);
     let length = ntoh16(header.length) as usize;
@@ -268,18 +267,20 @@ pub fn udp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     Err(Error::NoMatchingPcb)
 }
 
-pub fn udp_output(src: UdpEndpoint, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
+pub fn output(src: UdpEndpoint, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
     let total_len = size_of::<UdpHeader>() + data.len();
     if total_len > 65535 {
         return Err(Error::PacketTooLarge);
     }
 
     let mut packet = alloc::vec![0u8; total_len];
-    let header = unsafe { &mut *(packet.as_mut_ptr() as *mut UdpHeader) };
-    header.src_port = hton16(src.port);
-    header.dst_port = hton16(dst.port);
-    header.length = hton16(total_len as u16);
-    header.checksum = 0;
+    {
+        let header = parse_header_mut::<UdpHeader>(&mut packet)?;
+        header.src_port = hton16(src.port);
+        header.dst_port = hton16(dst.port);
+        header.length = hton16(total_len as u16);
+        header.checksum = 0;
+    }
 
     packet[size_of::<UdpHeader>()..].copy_from_slice(data);
 
@@ -290,7 +291,8 @@ pub fn udp_output(src: UdpEndpoint, dst: UdpEndpoint, data: &[u8]) -> Result<()>
     };
 
     let csum = udp_checksum(src_ip, dst.addr, &packet);
-    header.checksum = if csum == 0 { 0xFFFF } else { hton16(csum) };
+    let checksum_value = if csum == 0 { 0xFFFF } else { hton16(csum) };
+    packet[6..8].copy_from_slice(&checksum_value.to_ne_bytes());
 
     crate::println!(
         "[udp] sending: {}:{} -> {}:{}, {} bytes",
@@ -301,10 +303,10 @@ pub fn udp_output(src: UdpEndpoint, dst: UdpEndpoint, data: &[u8]) -> Result<()>
         total_len
     );
 
-    ip_output_route(dst.addr, UDP_PROTOCOL, &packet)
+    output_route(dst.addr, UDP_PROTOCOL, &packet)
 }
 
-pub fn udp_sendto(index: usize, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
+pub fn sendto(index: usize, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
     let pcbs = UDP_PCBS.lock();
     if index >= UDP_PCB_SIZE {
         return Err(Error::InvalidPcbIndex);
@@ -317,10 +319,10 @@ pub fn udp_sendto(index: usize, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
     let src = pcb.local;
     drop(pcbs);
 
-    udp_output(src, dst, data)
+    output(src, dst, data)
 }
 
-pub fn udp_recvfrom(index: usize, buf: &mut [u8]) -> Result<(usize, UdpEndpoint)> {
+pub fn recvfrom(index: usize, buf: &mut [u8]) -> Result<(usize, UdpEndpoint)> {
     let mut pcbs = UDP_PCBS.lock();
     if index >= UDP_PCB_SIZE {
         return Err(Error::InvalidPcbIndex);

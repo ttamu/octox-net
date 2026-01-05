@@ -382,7 +382,7 @@ pub fn init() -> Result<()> {
         NetDeviceFlags::BROADCAST,
         ethernet::EthHeader::LEN as u16,
         6,
-        guard.mac,
+        crate::net::ethernet::MacAddr(guard.mac),
         ops,
     );
     dev.open()?;

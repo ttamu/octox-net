@@ -1,6 +1,8 @@
 use super::{
     protocol::{net_protocol_register, ProtocolType},
-    util::{checksum, hton16, hton32, ntoh16, ntoh32, verify_checksum},
+    util::{
+        checksum, hton16, hton32, ntoh16, ntoh32, parse_header, parse_header_mut, verify_checksum,
+    },
 };
 use crate::{
     error::{Error, Result},
@@ -59,12 +61,8 @@ impl IpAddr {
     }
 }
 
-pub fn ip_input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
-    if data.len() < size_of::<IpHeader>() {
-        return Err(Error::PacketTooShort);
-    }
-
-    let header = unsafe { &*(data.as_ptr() as *const IpHeader) };
+pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
+    let header = parse_header::<IpHeader>(data)?;
     if header.version() != 4 {
         return Err(Error::InvalidVersion);
     }
@@ -95,36 +93,33 @@ pub fn ip_input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
 
     let payload = &data[hlen..total_len];
     match header.protocol {
-        IpHeader::ICMP => icmp::icmp_input(src, dst, payload),
-        IpHeader::UDP => udp::udp_input(src, dst, payload),
+        IpHeader::ICMP => icmp::input(src, dst, payload),
+        IpHeader::UDP => udp::input(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }
 }
 
-pub fn ip_output(
-    dev: &NetDevice,
-    protocol: u8,
-    src: IpAddr,
-    dst: IpAddr,
-    data: &[u8],
-) -> Result<()> {
+pub fn output(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     let total_len = size_of::<IpHeader>() + data.len();
     if total_len > 65535 {
         return Err(Error::PacketTooLarge);
     }
     let mut packet = alloc::vec![0u8; total_len];
-    let header = unsafe { &mut *(packet.as_mut_ptr() as *mut IpHeader) };
-    header.version_ihl = 0x45;
-    header.tos = 0;
-    header.total_len = hton16(total_len as u16);
-    header.id = 0;
-    header.flags_offset = 0;
-    header.ttl = 64;
-    header.protocol = protocol;
-    header.checksum = 0;
-    header.src = hton32(src.0);
-    header.dst = hton32(dst.0);
-    header.checksum = hton16(checksum(&packet[..size_of::<IpHeader>()]));
+    {
+        let header = parse_header_mut::<IpHeader>(&mut packet)?;
+        header.version_ihl = 0x45;
+        header.tos = 0;
+        header.total_len = hton16(total_len as u16);
+        header.id = 0;
+        header.flags_offset = 0;
+        header.ttl = 64;
+        header.protocol = protocol;
+        header.checksum = 0;
+        header.src = hton32(src.0);
+        header.dst = hton32(dst.0);
+    }
+    let csum = hton16(checksum(&packet[..size_of::<IpHeader>()]));
+    packet[10..12].copy_from_slice(&csum.to_ne_bytes());
     packet[size_of::<IpHeader>()..].copy_from_slice(data);
 
     crate::println!(
@@ -138,10 +133,10 @@ pub fn ip_output(
     dev_clone.transmit(&packet)
 }
 
-pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
+pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
     if dst.0 == IpAddr::LOOPBACK.0 {
         let dev = crate::net::device::net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-        return ip_output(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
+        return output(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
     }
 
     if let Some(route) = crate::net::route::lookup(dst) {
@@ -165,7 +160,7 @@ pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> 
         let total_len = core::mem::size_of::<super::ip::IpHeader>() + payload.len();
         let mut ip_packet = alloc::vec![0u8; total_len];
         {
-            let hdr = unsafe { &mut *(ip_packet.as_mut_ptr() as *mut super::ip::IpHeader) };
+            let hdr = parse_header_mut::<super::ip::IpHeader>(&mut ip_packet)?;
             hdr.version_ihl = 0x45;
             hdr.tos = 0;
             hdr.total_len = (total_len as u16).to_be();
@@ -176,10 +171,10 @@ pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> 
             hdr.checksum = 0;
             hdr.src = src.0.to_be();
             hdr.dst = dst.0.to_be();
-            hdr.checksum =
-                super::util::checksum(&ip_packet[..core::mem::size_of::<super::ip::IpHeader>()])
-                    .to_be();
         }
+        let csum = super::util::checksum(&ip_packet[..core::mem::size_of::<super::ip::IpHeader>()])
+            .to_be();
+        ip_packet[10..12].copy_from_slice(&csum.to_ne_bytes());
         ip_packet[core::mem::size_of::<super::ip::IpHeader>()..].copy_from_slice(payload);
         return crate::net::ethernet::output(
             &mut dev_clone,
@@ -194,7 +189,7 @@ pub fn ip_output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> 
 
 pub fn ip_init() {
     crate::println!("[net] IP layer init");
-    net_protocol_register(ProtocolType::IP, |dev, data| ip_input(dev, data));
+    net_protocol_register(ProtocolType::IP, |dev, data| input(dev, data));
 }
 
 pub fn parse_ip_str(s: &str) -> Result<IpAddr> {

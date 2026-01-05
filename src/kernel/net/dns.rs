@@ -1,6 +1,7 @@
 use super::{
     ip::IpAddr,
     udp::{self, UdpEndpoint},
+    util::parse_header,
 };
 use crate::error::{Error, Result};
 extern crate alloc;
@@ -63,11 +64,7 @@ fn build_dns_query(domain: &str, id: u16) -> Vec<u8> {
 }
 
 fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
-    if data.len() < core::mem::size_of::<DnsHeader>() {
-        return Err(Error::PacketTooShort);
-    }
-
-    let header = unsafe { &*(data.as_ptr() as *const DnsHeader) };
+    let header = parse_header::<DnsHeader>(data)?;
     let ancount = u16::from_be(header.ancount);
 
     crate::println!(
@@ -181,12 +178,12 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
     Err(Error::NotFound)
 }
 
-pub fn dns_resolve(domain: &str) -> Result<IpAddr> {
+pub fn resolve(domain: &str) -> Result<IpAddr> {
     crate::println!("[dns] Resolving: {}", domain);
     crate::println!("[dns] Querying upstream DNS server...");
-    let sockfd = udp::udp_pcb_alloc()?;
+    let sockfd = udp::pcb_alloc()?;
     let local = UdpEndpoint::any(0);
-    udp::udp_bind(sockfd, local)?;
+    udp::bind(sockfd, local)?;
 
     let query_id = 0x1234; // TODO: ランダムIDを使用
     let query = build_dns_query(domain, query_id);
@@ -201,14 +198,14 @@ pub fn dns_resolve(domain: &str) -> Result<IpAddr> {
     );
 
     let dns_endpoint = UdpEndpoint::new(DNS_SERVER, DNS_PORT);
-    udp::udp_sendto(sockfd, dns_endpoint, &query)?;
+    udp::sendto(sockfd, dns_endpoint, &query)?;
 
     let mut buf = alloc::vec![0u8; 512];
     let max_attempts = 100;
     for attempt in 0..max_attempts {
         crate::net::driver::virtio_net::poll_rx();
 
-        match udp::udp_recvfrom(sockfd, &mut buf) {
+        match udp::recvfrom(sockfd, &mut buf) {
             Ok((len, src)) => {
                 crate::println!(
                     "[dns] Received {} bytes from {}:{} (attempt {})",
@@ -220,7 +217,7 @@ pub fn dns_resolve(domain: &str) -> Result<IpAddr> {
 
                 match parse_dns_response(&buf[..len]) {
                     Ok(addr) => {
-                        udp::udp_pcb_release(sockfd)?;
+                        udp::pcb_release(sockfd)?;
                         crate::println!(
                             "[dns] Resolved {} to {}.{}.{}.{}",
                             domain,
@@ -244,12 +241,12 @@ pub fn dns_resolve(domain: &str) -> Result<IpAddr> {
                 }
             }
             Err(e) => {
-                udp::udp_pcb_release(sockfd)?;
+                udp::pcb_release(sockfd)?;
                 return Err(e);
             }
         }
     }
 
-    udp::udp_pcb_release(sockfd)?;
+    udp::pcb_release(sockfd)?;
     Err(Error::Timeout)
 }

@@ -1,8 +1,7 @@
 use super::{
-    ip::{ip_output, IpAddr, IpHeader},
-    util::{checksum, verify_checksum},
+    ip::{output, IpAddr, IpHeader},
+    util::{checksum, parse_header, parse_header_mut, verify_checksum},
 };
-use crate::net::ip::ip_output_route;
 use crate::{
     condvar::Condvar,
     error::{Error, Result},
@@ -53,16 +52,14 @@ pub struct IcmpReply {
 static ICMP_REPLY_QUEUE: Mutex<VecDeque<IcmpReply>> = Mutex::new(VecDeque::new(), "icmp_queue");
 static ICMP_REPLY_CV: Condvar = Condvar::new();
 
-pub fn icmp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
-    if data.len() < IcmpEcho::HEADER_SIZE {
-        return Err(Error::PacketTooShort);
-    }
+use super::ip;
 
+pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     if !verify_checksum(data) {
         return Err(Error::ChecksumError);
     }
 
-    let echo = unsafe { &*(data.as_ptr() as *const IcmpEcho) };
+    let echo = parse_header::<IcmpEcho>(data)?;
     let id = u16::from_be(echo.id);
     let seq = u16::from_be(echo.seq);
     let payload = &data[IcmpEcho::HEADER_SIZE..];
@@ -75,7 +72,7 @@ pub fn icmp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
                 id,
                 seq
             );
-            icmp_echo_reply(dst, src, id, seq, payload)
+            echo_reply(dst, src, id, seq, payload)
         }
         t if t == IcmpType::EchoReply as u8 => {
             crate::println!(
@@ -84,7 +81,7 @@ pub fn icmp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
                 id,
                 seq
             );
-            icmp_notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
+            notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
         }
         t if t == IcmpType::DestinationUnreachable as u8 => {
             let code = echo.code;
@@ -113,7 +110,7 @@ pub fn icmp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
                 orig_id,
                 orig_seq
             );
-            icmp_notify_reply(
+            notify_reply(
                 src,
                 orig_id,
                 orig_seq,
@@ -125,18 +122,21 @@ pub fn icmp_input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     }
 }
 
-pub fn icmp_echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
+pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
     let total_len = IcmpEcho::HEADER_SIZE + payload.len();
     let mut packet = vec![0u8; total_len];
 
-    let echo = unsafe { &mut *(packet.as_mut_ptr() as *mut IcmpEcho) };
-    echo.msg_type = IcmpType::EchoReply as u8;
-    echo.code = 0;
-    echo.checksum = 0;
-    echo.id = id.to_be();
-    echo.seq = seq.to_be();
+    {
+        let echo = parse_header_mut::<IcmpEcho>(&mut packet)?;
+        echo.msg_type = IcmpType::EchoReply as u8;
+        echo.code = 0;
+        echo.checksum = 0;
+        echo.id = id.to_be();
+        echo.seq = seq.to_be();
+    }
     packet[IcmpEcho::HEADER_SIZE..].copy_from_slice(payload);
-    echo.checksum = checksum(&packet).to_be();
+    let csum = checksum(&packet).to_be();
+    packet[2..4].copy_from_slice(&csum.to_ne_bytes());
 
     crate::println!(
         "[icmp] Sending Echo Reply to {:?}, id={}, seq={}",
@@ -146,20 +146,23 @@ pub fn icmp_echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u
     );
 
     let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-    ip_output(&dev, IpHeader::ICMP, src, dst, &packet)
+    output(&dev, IpHeader::ICMP, src, dst, &packet)
 }
 
-pub fn icmp_echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
+pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
     let total_len = IcmpEcho::HEADER_SIZE + payload.len();
     let mut packet = vec![0u8; total_len];
-    let echo = unsafe { &mut *(packet.as_mut_ptr() as *mut IcmpEcho) };
-    echo.msg_type = IcmpType::EchoRequest as u8;
-    echo.code = 0;
-    echo.checksum = 0;
-    echo.id = id.to_be();
-    echo.seq = seq.to_be();
+    {
+        let echo = parse_header_mut::<IcmpEcho>(&mut packet)?;
+        echo.msg_type = IcmpType::EchoRequest as u8;
+        echo.code = 0;
+        echo.checksum = 0;
+        echo.id = id.to_be();
+        echo.seq = seq.to_be();
+    }
     packet[IcmpEcho::HEADER_SIZE..].copy_from_slice(payload);
-    echo.checksum = checksum(&packet).to_be();
+    let csum = checksum(&packet).to_be();
+    packet[2..4].copy_from_slice(&csum.to_ne_bytes());
 
     crate::println!(
         "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
@@ -168,10 +171,10 @@ pub fn icmp_echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Resu
         seq
     );
 
-    ip_output_route(dst, IpHeader::ICMP, &packet)
+    ip::output_route(dst, IpHeader::ICMP, &packet)
 }
 
-pub fn icmp_notify_reply(
+pub fn notify_reply(
     src: IpAddr,
     id: u16,
     seq: u16,
@@ -194,7 +197,7 @@ pub fn icmp_notify_reply(
     Ok(())
 }
 
-pub fn icmp_recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
+pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
     let start = *crate::trap::TICKS.lock();
     let tick_ms = crate::param::TICK_MS as u64;
     let timeout_ticks = (timeout_ms + tick_ms - 1) / tick_ms;
