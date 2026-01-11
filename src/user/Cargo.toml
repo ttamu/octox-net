@@ -90,6 +90,14 @@ path = "bin/ping.rs"
 name = "_nslookup"
 path = "bin/nslookup.rs"
 
+[[bin]]
+name = "_echoserver"
+path = "bin/echoserver.rs"
+
+[[bin]]
+name = "_echoclient"
+path = "bin/echoclient.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

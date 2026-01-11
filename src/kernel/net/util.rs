@@ -22,6 +22,30 @@ pub fn ntoh32(n: u32) -> u32 {
     u32::from_be(n)
 }
 
+/// Read a u16 from a slice in network byte order (big-endian).
+#[inline]
+pub fn read_u16(data: &[u8]) -> u16 {
+    u16::from_be_bytes([data[0], data[1]])
+}
+
+/// Read an i32 from a slice in network byte order (big-endian).
+#[inline]
+pub fn read_i32(data: &[u8]) -> i32 {
+    i32::from_be_bytes([data[0], data[1], data[2], data[3]])
+}
+
+/// Write a u16 to a slice in network byte order (big-endian).
+#[inline]
+pub fn write_u16(data: &mut [u8], value: u16) {
+    data[..2].copy_from_slice(&value.to_be_bytes());
+}
+
+/// Write an i32 to a slice in network byte order (big-endian).
+#[inline]
+pub fn write_i32(data: &mut [u8], value: i32) {
+    data[..4].copy_from_slice(&value.to_be_bytes());
+}
+
 // internet checksum (RFC1071)
 pub fn checksum(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;

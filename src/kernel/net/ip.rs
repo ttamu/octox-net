@@ -8,7 +8,7 @@ use crate::{
     error::{Error, Result},
     net::{
         device::{net_device_by_name, NetDevice},
-        icmp, udp,
+        icmp, tcp, udp,
     },
 };
 extern crate alloc;
@@ -46,7 +46,7 @@ impl IpHeader {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IpAddr(pub u32);
 
 impl IpAddr {
@@ -94,6 +94,7 @@ pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let payload = &data[hlen..total_len];
     match header.protocol {
         IpHeader::ICMP => icmp::input(src, dst, payload),
+        IpHeader::TCP => tcp::tcp_input(src, dst, payload),
         IpHeader::UDP => udp::input(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }

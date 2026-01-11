@@ -8,6 +8,7 @@ pub mod interface;
 pub mod ip;
 pub mod protocol;
 pub mod route;
+pub mod tcp;
 pub mod udp;
 pub mod util;
 
@@ -15,6 +16,7 @@ pub fn init() {
     crate::println!("[kernel] Network stack init");
 
     ip::ip_init();
+    tcp::init();
 
     driver::loopback::loopback_init().expect("loopback init failed");
     driver::loopback::loopback_setup().expect("loopback setup failed");

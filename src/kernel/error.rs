@@ -54,6 +54,13 @@ pub enum Error {
     NoPortAvailable = -47,
     InvalidLength = -48,
     NoMatchingPcb = -49,
+    // TCP errors
+    SocketNotOpen = -50,
+    SocketAlreadyOpen = -51,
+    ConnectionRefused = -52,
+    ConnectionReset = -53,
+    ConnectionAborted = -54,
+    BufferFull = -55,
 }
 
 impl Error {
@@ -108,6 +115,12 @@ impl Error {
             NoPortAvailable => "no port available",
             InvalidLength => "invalid length",
             NoMatchingPcb => "no matching PCB",
+            SocketNotOpen => "socket not open",
+            SocketAlreadyOpen => "socket already open",
+            ConnectionRefused => "connection refused",
+            ConnectionReset => "connection reset",
+            ConnectionAborted => "connection aborted",
+            BufferFull => "buffer full",
             Uncategorized => "uncategorized error",
         }
     }
@@ -162,6 +175,12 @@ impl Error {
             -47 => NoPortAvailable,
             -48 => InvalidLength,
             -49 => NoMatchingPcb,
+            -50 => SocketNotOpen,
+            -51 => SocketAlreadyOpen,
+            -52 => ConnectionRefused,
+            -53 => ConnectionReset,
+            -54 => ConnectionAborted,
+            -55 => BufferFull,
             _ => Uncategorized,
         }
     }

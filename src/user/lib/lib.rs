@@ -70,6 +70,44 @@ pub fn dns_resolve(domain: &str) -> sys::Result<u32> {
     Ok(addr)
 }
 
+// ========== TCP API ==========
+
+/// Allocate a new TCP socket.
+pub fn tcp_socket() -> sys::Result<usize> {
+    sys::tcpsocket()
+}
+
+/// Connect to a remote endpoint (blocking).
+pub fn tcp_connect(sock: usize, addr: &str, port: u16, local_port: u16) -> sys::Result<()> {
+    sys::tcpconnect(sock, addr.as_bytes(), port, local_port)
+}
+
+/// Listen for incoming connections on a port.
+pub fn tcp_listen(sock: usize, port: u16) -> sys::Result<()> {
+    sys::tcplisten(sock, port)
+}
+
+/// Accept an incoming connection (blocking).
+/// Returns the new socket index for the accepted connection.
+pub fn tcp_accept(sock: usize) -> sys::Result<usize> {
+    sys::tcpaccept(sock)
+}
+
+/// Send data on a connected socket.
+pub fn tcp_send(sock: usize, data: &[u8]) -> sys::Result<usize> {
+    sys::tcpsend(sock, data)
+}
+
+/// Receive data from a connected socket (blocking).
+pub fn tcp_recv(sock: usize, buf: &mut [u8]) -> sys::Result<usize> {
+    sys::tcprecv(sock, buf)
+}
+
+/// Close a TCP socket.
+pub fn tcp_close(sock: usize) -> sys::Result<()> {
+    sys::tcpclose(sock)
+}
+
 pub enum ExitCode {
     SUCCESS = 0x0isize,
     FAILURE = 0x1isize,
