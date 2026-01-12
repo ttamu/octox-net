@@ -80,5 +80,12 @@ pub fn output(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
         hdr.ethertype = ethertype.to_be();
     }
     frame[EthHeader::LEN..].copy_from_slice(payload);
+    crate::trace!(
+        ETHER,
+        "[ether] output: dst={:02x?} type=0x{:04x} len={}",
+        dst_mac.0,
+        ethertype,
+        frame.len()
+    );
     dev.transmit(&frame)
 }

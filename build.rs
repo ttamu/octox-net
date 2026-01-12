@@ -55,7 +55,10 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
     if status.success() {
         let mut ufiles: Vec<PathBuf> = Vec::new();
         let mut collet_files = |dir: &Path, prefix: Option<&str>| {
-            for entry in fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
                 if path.is_file() {
                     let should_push = match (prefix, path.file_name().and_then(|s| s.to_str())) {

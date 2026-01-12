@@ -433,4 +433,7 @@ pub fn intr() {
     let intr_stat = Mmio::InterruptStatus.read();
     unsafe { Mmio::InterruptAck.write(intr_stat & 0x3) };
     poll_rx();
+
+    // Poll TCP sockets for pending transmissions after receiving packets
+    let _ = crate::net::tcp::tcp_poll();
 }

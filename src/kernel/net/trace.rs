@@ -28,7 +28,7 @@ impl Flags {
 
 // 今のところは初期値を変更してビルドすることで表示を切り替え (全てON: 0b1111_1111)
 // TODO: ユーザ空間から制御できるようにする
-static TRACE_FLAGS: AtomicU32 = AtomicU32::new(0xFFFF_FFFF);
+static TRACE_FLAGS: AtomicU32 = AtomicU32::new(0);
 
 pub fn is_enabled(flag: Flags) -> bool {
     let flags = Flags::from_bits(TRACE_FLAGS.load(Ordering::Relaxed));

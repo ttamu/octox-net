@@ -90,6 +90,10 @@ path = "bin/ping.rs"
 name = "_nslookup"
 path = "bin/nslookup.rs"
 
+[[bin]]
+name = "_nc"
+path = "bin/nc.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

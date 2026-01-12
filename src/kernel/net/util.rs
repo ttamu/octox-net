@@ -22,8 +22,32 @@ pub fn ntoh32(n: u32) -> u32 {
     u32::from_be(n)
 }
 
-// internet checksum (RFC1071)
-pub fn checksum(data: &[u8]) -> u16 {
+/// Read a u16 from a slice in network byte order.
+#[inline]
+pub fn read_u16(data: &[u8]) -> u16 {
+    u16::from_be_bytes([data[0], data[1]])
+}
+
+/// Read an i32 from a slice in network byte order.
+#[inline]
+pub fn read_i32(data: &[u8]) -> i32 {
+    i32::from_be_bytes([data[0], data[1], data[2], data[3]])
+}
+
+/// Write a u16 to a slice in network byte order.
+#[inline]
+pub fn write_u16(data: &mut [u8], value: u16) {
+    data[..2].copy_from_slice(&value.to_be_bytes());
+}
+
+/// Write an i32 to a slice in network byte order.
+#[inline]
+pub fn write_i32(data: &mut [u8], value: i32) {
+    data[..4].copy_from_slice(&value.to_be_bytes());
+}
+
+/// Compute raw checksum.
+pub fn checksum_raw(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     let mut i = 0;
     while i + 1 < data.len() {
@@ -37,7 +61,12 @@ pub fn checksum(data: &[u8]) -> u16 {
     while (sum >> 16) != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
     }
-    !(sum as u16)
+    sum as u16
+}
+
+// internet checksum (RFC1071)
+pub fn checksum(data: &[u8]) -> u16 {
+    !checksum_raw(data)
 }
 
 pub fn verify_checksum(data: &[u8]) -> bool {
