@@ -1,6 +1,6 @@
 #+TITLE: octox-net
 
-base: [[https://github.com/o8vm/octox][octox]]
+ベースにしたOS: [[https://github.com/o8vm/octox][octox]]
 
 ** ファイル構成
 
@@ -17,28 +17,6 @@ octox-net/
 ├── docs/
 └── Makefile
 #+end_example
-
-** 利用可能なコマンド
-
-| コマンド  | 説明                         |
-|-----------+------------------------------|
-| cat       | ファイルの内容を表示         |
-| clear     | ターミナル画面をクリア       |
-| echo      | テキストを表示               |
-| grep      | ファイル内のテキストを検索   |
-| head      | ファイルの先頭部分を表示     |
-| jell      | カスタムアプリケーション     |
-| kill      | プロセスを終了               |
-| ln        | ファイル間のリンクを作成     |
-| ls        | ディレクトリの内容を一覧表示 |
-| mkdir     | ディレクトリを作成           |
-| nslookup  | DNSネームサーバーに問い合わせ|
-| ping      | ICMPエコーリクエストを送信   |
-| rm        | ファイルやディレクトリを削除 |
-| sh        | シェルコマンドインタプリタ   |
-| sleep     | 指定時間実行を一時停止       |
-| touch     | 空ファイルを作成             |
-| wc        | 行数、単語数、文字数をカウント|
 
 ** Usage
 
