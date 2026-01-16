@@ -67,7 +67,8 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
     let header = parse_header::<DnsHeader>(data)?;
     let ancount = u16::from_be(header.ancount);
 
-    crate::println!(
+    crate::trace!(
+        DNS,
         "[dns] Response: id={:04x}, flags={:04x}, questions={}, answers={}",
         u16::from_be(header.id),
         u16::from_be(header.flags),
@@ -148,7 +149,8 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
 
         offset += 10;
 
-        crate::println!(
+        crate::trace!(
+            DNS,
             "[dns] Answer {}: type={}, class={}, ttl={}, rdlen={}",
             i + 1,
             rtype,
@@ -179,8 +181,8 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
 }
 
 pub fn resolve(domain: &str) -> Result<IpAddr> {
-    crate::println!("[dns] Resolving: {}", domain);
-    crate::println!("[dns] Querying upstream DNS server...");
+    crate::trace!(DNS, "[dns] Resolving: {}", domain);
+    crate::trace!(DNS, "[dns] Querying upstream DNS server...");
     let sockfd = udp::pcb_alloc()?;
     let local = UdpEndpoint::any(0);
     udp::bind(sockfd, local)?;
@@ -188,7 +190,8 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
     let query_id = 0x1234; // TODO: ランダムIDを使用
     let query = build_dns_query(domain, query_id);
 
-    crate::println!(
+    crate::trace!(
+        DNS,
         "[dns] Sending query to {}.{}.{}.{}:53 ({} bytes)",
         (DNS_SERVER.0 >> 24) & 0xFF,
         (DNS_SERVER.0 >> 16) & 0xFF,
@@ -207,7 +210,8 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
 
         match udp::recvfrom(sockfd, &mut buf) {
             Ok((len, src)) => {
-                crate::println!(
+                crate::trace!(
+                    DNS,
                     "[dns] Received {} bytes from {}:{} (attempt {})",
                     len,
                     src.addr.to_bytes()[0],
@@ -218,7 +222,8 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
                 match parse_dns_response(&buf[..len]) {
                     Ok(addr) => {
                         udp::pcb_release(sockfd)?;
-                        crate::println!(
+                        crate::trace!(
+                            DNS,
                             "[dns] Resolved {} to {}.{}.{}.{}",
                             domain,
                             (addr.0 >> 24) & 0xFF,
@@ -229,7 +234,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
                         return Ok(addr);
                     }
                     Err(e) => {
-                        crate::println!("[dns] Failed to parse response: {:?}", e);
+                        crate::trace!(DNS, "[dns] Failed to parse response: {:?}", e);
                     }
                 }
             }

@@ -84,7 +84,8 @@ pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let src = IpAddr(ntoh32(header.src));
     let dst = IpAddr(ntoh32(header.dst));
 
-    crate::println!(
+    crate::trace!(
+        IP,
         "[ip] received packet: {:?} -> {:?}, proto={}",
         src.to_bytes(),
         dst.to_bytes(),
@@ -122,7 +123,8 @@ pub fn output(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u
     packet[10..12].copy_from_slice(&csum.to_ne_bytes());
     packet[size_of::<IpHeader>()..].copy_from_slice(data);
 
-    crate::println!(
+    crate::trace!(
+        IP,
         "[ip] sending packet: {:?} -> {:?}, {} bytes",
         src.to_bytes(),
         dst.to_bytes(),

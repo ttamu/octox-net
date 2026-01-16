@@ -50,7 +50,8 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
     let hdr = parse_header::<EthHeader>(data)?;
     let etype = ntoh16(hdr.ethertype);
 
-    crate::println!(
+    crate::trace!(
+        ETHER,
         "[ether] input: ethertype=0x{:04x}, len={}",
         etype,
         data.len()
@@ -61,7 +62,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
         ETHERTYPE_ARP => crate::net::arp::input(dev, payload),
         ETHERTYPE_IPV4 => net_protocol_handler(dev, ProtocolType::IP, payload),
         _ => {
-            crate::println!("[ether] unsupported ethertype: 0x{:04x}", etype);
+            crate::trace!(ETHER, "[ether] unsupported ethertype: 0x{:04x}", etype);
             Err(Error::UnsupportedProtocol)
         }
     }

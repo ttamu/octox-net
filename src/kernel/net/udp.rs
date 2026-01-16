@@ -230,7 +230,8 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
         return Err(Error::InvalidLength);
     }
 
-    crate::println!(
+    crate::trace!(
+        UDP,
         "[udp] received: {}:{} -> {}:{}, {} bytes",
         src.to_bytes()[0],
         src_port,
@@ -259,7 +260,7 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
                 data: payload.to_vec(),
             };
             pcb.recv_queue.push_back(packet);
-            crate::println!("[udp] packet queued for port {}", dst_port);
+            crate::trace!(UDP, "[udp] packet queued for port {}", dst_port);
             return Ok(());
         }
     }
@@ -294,7 +295,8 @@ pub fn output(src: UdpEndpoint, dst: UdpEndpoint, data: &[u8]) -> Result<()> {
     let checksum_value = if csum == 0 { 0xFFFF } else { hton16(csum) };
     packet[6..8].copy_from_slice(&checksum_value.to_ne_bytes());
 
-    crate::println!(
+    crate::trace!(
+        UDP,
         "[udp] sending: {}:{} -> {}:{}, {} bytes",
         src.addr.to_bytes()[0],
         src.port,

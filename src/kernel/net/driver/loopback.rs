@@ -14,18 +14,18 @@ use crate::{
 const LOOPBACK_MTU: u16 = u16::MAX;
 
 fn loopback_transmit(dev: &mut NetDevice, data: &[u8]) -> Result<()> {
-    crate::println!("[loopback] transmit {} bytes", data.len());
+    crate::trace!(DRIVER, "[loopback] transmit {} bytes", data.len());
     protocol::net_input_handler(dev, data)
 }
 
 fn loopback_open(dev: &mut NetDevice) -> Result<()> {
-    crate::println!("[loopback] device opened");
+    crate::trace!(DRIVER, "[loopback] device opened");
     dev.set_flags(dev.flags() | NetDeviceFlags::UP | NetDeviceFlags::RUNNING);
     Ok(())
 }
 
 fn loopback_close(dev: &mut NetDevice) -> Result<()> {
-    crate::println!("[loopback] device closed");
+    crate::trace!(DRIVER, "[loopback] device closed");
     dev.set_flags(dev.flags() & !NetDeviceFlags::RUNNING);
     Ok(())
 }

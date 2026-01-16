@@ -313,7 +313,7 @@ impl VirtioNet {
             let used_elem = self.used_rx.ring[(self.used_idx_rx as usize) % NUM];
             let id = used_elem.id as usize;
             if id >= NUM {
-                crate::println!("[virtio-net] invalid RX descriptor id: {}", id);
+                crate::trace!(DRIVER, "[virtio-net] invalid RX descriptor id: {}", id);
                 self.used_idx_rx = self.used_idx_rx.wrapping_add(1);
                 continue;
             }
@@ -335,7 +335,7 @@ impl VirtioNet {
             let used_elem = self.used_tx.ring[(self.used_idx_tx as usize) % NUM];
             let id = used_elem.id as usize;
             if id >= NUM {
-                crate::println!("[virtio-net] invalid TX descriptor id: {}", id);
+                crate::trace!(DRIVER, "[virtio-net] invalid TX descriptor id: {}", id);
                 self.used_idx_tx = self.used_idx_tx.wrapping_add(1);
                 continue;
             }
@@ -415,7 +415,7 @@ pub fn poll_rx() {
     let mut guard = NET.lock();
     if let Ok(pkts) = guard.handle_used() {
         if pkts.len() > 0 {
-            crate::println!("[virtio-net] poll_rx: received {} packets", pkts.len());
+            crate::trace!(DRIVER, "[virtio-net] poll_rx: received {} packets", pkts.len());
         }
         drop(guard);
         for p in pkts {

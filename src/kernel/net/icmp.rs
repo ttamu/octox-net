@@ -66,7 +66,8 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
 
     match echo.msg_type {
         t if t == IcmpType::EchoRequest as u8 => {
-            crate::println!(
+            crate::trace!(
+                ICMP,
                 "[icmp] Received Echo Request from {:?}, id={}, seq={}",
                 src.to_bytes(),
                 id,
@@ -75,7 +76,8 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
             echo_reply(dst, src, id, seq, payload)
         }
         t if t == IcmpType::EchoReply as u8 => {
-            crate::println!(
+            crate::trace!(
+                ICMP,
                 "[icmp] Received Echo Reply from {:?}, id={}, seq={}",
                 src.to_bytes(),
                 id,
@@ -104,7 +106,8 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
 
             let orig_id = u16::from_be_bytes([inner_icmp[4], inner_icmp[5]]);
             let orig_seq = u16::from_be_bytes([inner_icmp[6], inner_icmp[7]]);
-            crate::println!(
+            crate::trace!(
+                ICMP,
                 "[icmp] Destination Unreachable code={} for id={}, seq={}",
                 code,
                 orig_id,
@@ -138,7 +141,8 @@ pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -
     let csum = checksum(&packet).to_be();
     packet[2..4].copy_from_slice(&csum.to_ne_bytes());
 
-    crate::println!(
+    crate::trace!(
+        ICMP,
         "[icmp] Sending Echo Reply to {:?}, id={}, seq={}",
         dst.to_bytes(),
         id,
@@ -164,7 +168,8 @@ pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()
     let csum = checksum(&packet).to_be();
     packet[2..4].copy_from_slice(&csum.to_ne_bytes());
 
-    crate::println!(
+    crate::trace!(
+        ICMP,
         "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
         dst.to_bytes(),
         id,

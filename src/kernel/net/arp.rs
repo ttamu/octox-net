@@ -60,7 +60,7 @@ fn insert(ip: IpAddr, mac: MacAddr) {
             });
         }
     }
-    crate::println!("[arp] insert {:?} -> {}", ip.to_bytes(), mac);
+    crate::trace!(ARP, "[arp] insert {:?} -> {}", ip.to_bytes(), mac);
     ARP_CV.notify_all();
 }
 
@@ -78,7 +78,8 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
     let sender_mac = MacAddr(pkt.sha);
     let target_ip = IpAddr(u32::from_be(pkt.tpa));
 
-    crate::println!(
+    crate::trace!(
+        ARP,
         "[arp] oper={} sender={:?} target={:?}",
         oper,
         sender_ip.to_bytes(),
@@ -87,7 +88,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
 
     match oper {
         ARP_OP_REPLY => {
-            crate::println!("[arp] reply from {:?}", sender_ip.to_bytes());
+            crate::trace!(ARP, "[arp] reply from {:?}", sender_ip.to_bytes());
             insert(sender_ip, sender_mac);
         }
         ARP_OP_REQUEST => {
@@ -140,7 +141,7 @@ pub fn resolve(
     timeout_ticks: usize,
 ) -> Result<MacAddr> {
     if let Some(mac) = lookup(target_ip) {
-        crate::println!("[arp] cache hit {:?}", mac);
+        crate::trace!(ARP, "[arp] cache hit {:?}", mac);
         return Ok(mac);
     }
     {
@@ -152,7 +153,8 @@ pub fn resolve(
         if !dev.flags().contains(NetDeviceFlags::UP) {
             return Err(Error::NotConnected);
         }
-        crate::println!(
+        crate::trace!(
+            ARP,
             "[arp] send request who-has {:?} tell {:?}",
             target_ip.to_bytes(),
             sender_ip.to_bytes()
@@ -164,12 +166,12 @@ pub fn resolve(
     loop {
         crate::net::driver::virtio_net::poll_rx();
         if let Some(mac) = lookup(target_ip) {
-            crate::println!("[arp] resolved {:?} -> {:02x?}", target_ip.to_bytes(), mac);
+            crate::trace!(ARP, "[arp] resolved {:?} -> {:02x?}", target_ip.to_bytes(), mac);
             return Ok(mac);
         }
         let elapsed = *crate::trap::TICKS.lock() - start;
         if elapsed > timeout_ticks {
-            crate::println!("[arp] timeout waiting reply");
+            crate::trace!(ARP, "[arp] timeout waiting reply");
             return Err(Error::Timeout);
         }
         crate::proc::yielding();

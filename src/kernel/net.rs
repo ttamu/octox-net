@@ -8,6 +8,7 @@ pub mod interface;
 pub mod ip;
 pub mod protocol;
 pub mod route;
+pub mod trace;
 pub mod udp;
 pub mod util;
 
