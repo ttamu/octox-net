@@ -60,3 +60,32 @@ pub fn parse_header_mut<'a, H: Sized>(data: &'a mut [u8]) -> Result<&'a mut H> {
     }
     Ok(unsafe { &mut *(data.as_mut_ptr() as *mut H) })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    #[test_case]
+    fn endian_roundtrip() {
+        let v16 = 0x1234u16;
+        let v32 = 0x1234_5678u32;
+        assert_eq!(ntoh16(hton16(v16)), v16);
+        assert_eq!(ntoh32(hton32(v32)), v32);
+    }
+
+    #[test_case]
+    fn checksum_verification() {
+        let payload = [0x12u8, 0x34, 0x56, 0x78];
+        let sum = checksum(&payload);
+        let packet = [payload[0], payload[1], payload[2], payload[3], (sum >> 8) as u8, sum as u8];
+        assert!(verify_checksum(&packet));
+    }
+
+    #[test_case]
+    fn parse_header_too_short() {
+        let data = [0u8; 2];
+        let err = parse_header::<u32>(&data).unwrap_err();
+        assert_eq!(err, Error::PacketTooShort);
+    }
+}
