@@ -78,7 +78,14 @@ mod tests {
     fn checksum_verification() {
         let payload = [0x12u8, 0x34, 0x56, 0x78];
         let sum = checksum(&payload);
-        let packet = [payload[0], payload[1], payload[2], payload[3], (sum >> 8) as u8, sum as u8];
+        let packet = [
+            payload[0],
+            payload[1],
+            payload[2],
+            payload[3],
+            (sum >> 8) as u8,
+            sum as u8,
+        ];
         assert!(verify_checksum(&packet));
     }
 

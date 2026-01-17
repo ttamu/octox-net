@@ -41,7 +41,12 @@ pub fn net_protocol_handler(dev: &NetDevice, ptype: ProtocolType, data: &[u8]) -
 }
 
 pub fn net_input_handler(dev: &NetDevice, data: &[u8]) -> Result<()> {
-    crate::trace!(DRIVER, "[net] input {} bytes from {}", data.len(), dev.name());
+    crate::trace!(
+        DRIVER,
+        "[net] input {} bytes from {}",
+        data.len(),
+        dev.name()
+    );
 
     if dev.flags().contains(NetDeviceFlags::LOOPBACK) {
         return net_protocol_handler(dev, ProtocolType::IP, data);

@@ -26,7 +26,9 @@ impl<T: Fn()> Testable for T {
 
 pub(crate) fn test_runner(tests: &[&dyn Testable]) -> ! {
     #[cfg(target_os = "none")]
-    unsafe { crate::uart::init() };
+    unsafe {
+        crate::uart::init()
+    };
 
     println!("running {} tests", tests.len());
     println!("");
@@ -46,7 +48,9 @@ pub(crate) fn test_runner(tests: &[&dyn Testable]) -> ! {
 
 pub(crate) fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     #[cfg(target_os = "none")]
-    unsafe { crate::uart::init() };
+    unsafe {
+        crate::uart::init()
+    };
     FAILED.fetch_add(1, Ordering::Relaxed);
 
     let name = unsafe { CURRENT_TEST.unwrap_or("<unknown>") };

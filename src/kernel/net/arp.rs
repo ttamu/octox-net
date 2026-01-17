@@ -166,7 +166,12 @@ pub fn resolve(
     loop {
         crate::net::driver::virtio_net::poll_rx();
         if let Some(mac) = lookup(target_ip) {
-            crate::trace!(ARP, "[arp] resolved {:?} -> {:02x?}", target_ip.to_bytes(), mac);
+            crate::trace!(
+                ARP,
+                "[arp] resolved {:?} -> {:02x?}",
+                target_ip.to_bytes(),
+                mac
+            );
             return Ok(mac);
         }
         let elapsed = *crate::trap::TICKS.lock() - start;

@@ -415,7 +415,11 @@ pub fn poll_rx() {
     let mut guard = NET.lock();
     if let Ok(pkts) = guard.handle_used() {
         if pkts.len() > 0 {
-            crate::trace!(DRIVER, "[virtio-net] poll_rx: received {} packets", pkts.len());
+            crate::trace!(
+                DRIVER,
+                "[virtio-net] poll_rx: received {} packets",
+                pkts.len()
+            );
         }
         drop(guard);
         for p in pkts {
