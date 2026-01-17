@@ -6,6 +6,7 @@ use crate::vm::{KVAddr, VAddr};
 // based on qemu's hw/riscv/virt.c:
 //
 // 00001000 -- boot ROM, provided by qemu
+// 00100000 -- test device
 // 02000000 -- CLINT
 // 0C000000 -- PLIC
 // 10000000 -- uart0
@@ -18,6 +19,9 @@ use crate::vm::{KVAddr, VAddr};
 // 80000000 -- entry.S, then kernel text and data
 // end -- start of kernel page allocation area
 // PHYSTOP -- end RAM used by the kernel
+
+// qemu puts test device here.
+pub const VIRT_TEST: usize = 0x100000;
 
 // qemu puts UART registers here in physical memory.
 pub const UART0: usize = 0x1000_0000;

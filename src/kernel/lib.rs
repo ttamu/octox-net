@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(target_os = "none", no_main)]
 #![cfg_attr(
     all(target_os = "none", feature = "kernel"),
     feature(alloc_error_handler)
@@ -8,6 +9,9 @@
 #![feature(fn_align)]
 #![feature(variant_count)]
 #![allow(clippy::missing_safety_doc)]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner::test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
 extern crate alloc;
@@ -84,6 +88,32 @@ pub mod trap;
 pub mod virtio_disk;
 #[cfg(all(target_os = "none", feature = "kernel"))]
 pub mod vm;
+
+#[cfg(test)]
+pub mod test_runner;
+
+#[cfg(test)]
+#[no_mangle]
+pub extern "C" fn main() -> ! {
+    let hart_id = unsafe { crate::proc::Cpus::cpu_id() };
+    if hart_id != 0 {
+        loop {
+            unsafe { core::arch::asm!("wfi") }
+        }
+    }
+
+    test_main();
+
+    loop {
+        unsafe { core::arch::asm!("wfi") }
+    }
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    crate::test_runner::panic(info)
+}
 
 #[macro_export]
 macro_rules! kmain {

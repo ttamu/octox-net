@@ -2,6 +2,7 @@ use crate::defs::AsBytes;
 use crate::error::{Error::*, Result};
 use crate::memlayout::{
     CLINT, KERNBASE, PHYSTOP, PLIC, STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME, UART0, VIRTIO0, VIRTIO1,
+    VIRT_TEST,
 };
 use crate::proc::PROCS;
 use crate::riscv::{pgroundup, pteflags::*, registers::satp, sfence_vma, PGSHIFT, PGSIZE};
@@ -668,6 +669,9 @@ impl Kvm {
 
         // PLIC
         self.map(PLIC.into(), PLIC.into(), 0x0040_0000, PTE_R | PTE_W);
+
+        // SiFive Test Finisher
+        self.map(VIRT_TEST.into(), VIRT_TEST.into(), PGSIZE, PTE_R | PTE_W);
 
         // map kernel text executable and read-only.
         self.map(
