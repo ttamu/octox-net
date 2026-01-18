@@ -8,7 +8,7 @@ use crate::{
     error::{Error, Result},
     net::{
         device::{net_device_by_name, NetDevice},
-        icmp, udp,
+        icmp, tcp, udp,
     },
 };
 extern crate alloc;
@@ -46,7 +46,7 @@ impl IpHeader {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IpAddr(pub u32);
 
 impl IpAddr {
@@ -95,6 +95,7 @@ pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let payload = &data[hlen..total_len];
     match header.protocol {
         IpHeader::ICMP => icmp::input(src, dst, payload),
+        IpHeader::TCP => tcp::input(src, dst, payload),
         IpHeader::UDP => udp::input(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }
@@ -135,6 +136,25 @@ pub fn output(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u
     dev_clone.transmit(&packet)
 }
 
+pub fn get_source_address(dst: IpAddr) -> Option<IpAddr> {
+    if dst.0 == IpAddr::LOOPBACK.0 {
+        return Some(IpAddr::LOOPBACK);
+    }
+
+    let route = crate::net::route::lookup(dst)?;
+    let dev = net_device_by_name(route.dev)?;
+
+    if let Some(iface) = dev
+        .interfaces
+        .iter()
+        .find(|i| (dst.0 & i.netmask.0) == (i.addr.0 & i.netmask.0))
+    {
+        return Some(iface.addr);
+    }
+
+    dev.interfaces.first().map(|i| i.addr)
+}
+
 pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
     if dst.0 == IpAddr::LOOPBACK.0 {
         let dev = crate::net::device::net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
@@ -143,17 +163,7 @@ pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
 
     if let Some(route) = crate::net::route::lookup(dst) {
         let dev = net_device_by_name(route.dev).ok_or(Error::DeviceNotFound)?;
-        let src = dev
-            .interfaces
-            .iter()
-            .find(|i| (dst.0 & i.netmask.0) == (i.addr.0 & i.netmask.0))
-            .map(|i| i.addr)
-            .unwrap_or_else(|| {
-                dev.interfaces
-                    .first()
-                    .map(|i| i.addr)
-                    .unwrap_or(IpAddr::LOOPBACK)
-            });
+        let src = get_source_address(dst).unwrap_or(IpAddr::LOOPBACK);
 
         let next_hop = route.gateway.unwrap_or(dst);
         let mac = crate::net::arp::resolve(dev.name(), next_hop, src, crate::param::TICK_HZ)

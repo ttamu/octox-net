@@ -56,6 +56,13 @@ pub enum SysCalls {
     IcmpRecvReply = 25,
     Clocktime = 26,
     DnsResolve = 27,
+    TcpSocket = 28,
+    TcpConnect = 29,
+    TcpListen = 30,
+    TcpSend = 31,
+    TcpRecv = 32,
+    TcpClose = 33,
+    TcpAccept = 34,
     Invalid = 0,
 }
 
@@ -122,6 +129,16 @@ impl SysCalls {
             Fn::I(Self::dnsresolve),
             "(domain: &[u8], addr_out: &mut u32)",
         ),
+        (Fn::I(Self::tcpsocket), "()"),
+        (
+            Fn::U(Self::tcpconnect),
+            "(sock: usize, remote_addr: &[u8], remote_port: u16, local_port: u16)",
+        ),
+        (Fn::U(Self::tcplisten), "(sock: usize, port: u16)"),
+        (Fn::I(Self::tcpsend), "(sock: usize, data: &[u8])"),
+        (Fn::I(Self::tcprecv), "(sock: usize, buf: &mut [u8])"),
+        (Fn::U(Self::tcpclose), "(sock: usize)"),
+        (Fn::I(Self::tcpaccept), "(sock: usize)"),
     ];
     pub fn invalid() -> ! {
         unimplemented!()
@@ -757,6 +774,219 @@ impl SysCalls {
             Ok(0)
         }
     }
+
+    pub fn tcpsocket() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            crate::net::tcp::socket_alloc()
+        }
+    }
+
+    pub fn tcpconnect() -> Result<()> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(());
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            use crate::net::ip::{parse_ip_str, IpAddr};
+            use crate::net::tcp::{IpEndpoint, State};
+
+            let sock = argraw(0);
+            let mut sbinfo: SBInfo = Default::default();
+            let sbinfo = SBInfo::from_arg(1, &mut sbinfo)?;
+            let mut buf = alloc::vec![0u8; sbinfo.len];
+            crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
+            let s = core::str::from_utf8(&buf).or(Err(Utf8Error))?;
+            let remote_addr = parse_ip_str(s.trim_end_matches(char::from(0)))?;
+            let remote_port = argraw(2) as u16;
+            let local_port = argraw(3) as u16;
+
+            let local_endpoint = IpEndpoint::new(IpAddr(0), local_port);
+            let remote_endpoint = IpEndpoint::new(remote_addr, remote_port);
+
+            crate::net::tcp::socket_get_mut(sock, |socket| {
+                socket.connect(local_endpoint, remote_endpoint)
+            })??;
+
+            let _ = crate::net::tcp::poll();
+
+            let p = Cpus::myproc().unwrap();
+            loop {
+                let _ = crate::net::tcp::poll();
+
+                let state = crate::net::tcp::socket_get(sock, |s| s.state())?;
+                match state {
+                    State::Established => return Ok(()),
+                    State::Closed => return Err(ConnectionRefused),
+                    State::SynSent | State::SynReceived => {
+                        if p.inner.lock().killed {
+                            return Err(Interrupted);
+                        }
+                        let ticks = TICKS.lock();
+                        let _ = sleep(&(*ticks) as *const _ as usize, ticks);
+                    }
+                    _ => return Err(ConnectionAborted),
+                }
+            }
+        }
+    }
+
+    pub fn tcplisten() -> Result<()> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(());
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            use crate::net::ip::IpAddr;
+            use crate::net::tcp::IpEndpoint;
+
+            let sock = argraw(0);
+            let port = argraw(1) as u16;
+
+            let endpoint = IpEndpoint::new(IpAddr(0), port);
+
+            crate::net::tcp::socket_get_mut(sock, |socket| socket.listen(endpoint))?
+        }
+    }
+
+    pub fn tcpaccept() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            let sock = argraw(0);
+
+            let p = Cpus::myproc().unwrap();
+            let mut first = true;
+            loop {
+                let (has_pending, state, local_port) = crate::net::tcp::socket_get(sock, |s| {
+                    (
+                        s.has_pending_connection(),
+                        s.state(),
+                        s.local_endpoint().port,
+                    )
+                })?;
+
+                if first {
+                    crate::println!(
+                        "[tcpaccept] sock={} state={} port={} pending={}",
+                        sock,
+                        state,
+                        local_port,
+                        has_pending
+                    );
+                    first = false;
+                }
+
+                if has_pending {
+                    return crate::net::tcp::socket_accept(sock);
+                }
+
+                let is_listening = crate::net::tcp::socket_get(sock, |s| {
+                    s.is_listening() || s.has_pending_connection()
+                })?;
+
+                if !is_listening {
+                    crate::println!("[tcpaccept] socket not listening, state={}", state);
+                    return Err(SocketNotOpen);
+                }
+
+                if p.inner.lock().killed {
+                    return Err(Interrupted);
+                }
+                let ticks = TICKS.lock();
+                let _ = sleep(&(*ticks) as *const _ as usize, ticks);
+            }
+        }
+    }
+
+    pub fn tcpsend() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            let sock = argraw(0);
+            let mut sbinfo: SBInfo = Default::default();
+            let sbinfo = SBInfo::from_arg(1, &mut sbinfo)?;
+            let mut buf = alloc::vec![0u8; sbinfo.len];
+            crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
+
+            let result = crate::net::tcp::socket_get_mut(sock, |socket| socket.send_slice(&buf))??;
+
+            let _ = crate::net::tcp::poll();
+
+            Ok(result)
+        }
+    }
+
+    pub fn tcprecv() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            use crate::net::tcp::State;
+
+            let sock = argraw(0);
+            let mut sbinfo: SBInfo = Default::default();
+            let sbinfo = SBInfo::from_arg(1, &mut sbinfo)?;
+
+            let p = Cpus::myproc().unwrap();
+            loop {
+                let (may_recv, state) =
+                    crate::net::tcp::socket_get(sock, |s| (s.may_recv(), s.state()))?;
+
+                if may_recv {
+                    let mut buf = alloc::vec![0u8; sbinfo.len];
+                    let n = crate::net::tcp::socket_get_mut(sock, |socket| {
+                        socket.recv_slice(&mut buf)
+                    })??;
+                    crate::proc::either_copyout(sbinfo.ptr.into(), &buf[..n])?;
+                    return Ok(n);
+                }
+
+                match state {
+                    State::Closed | State::TimeWait => return Ok(0),
+                    State::CloseWait if !may_recv => return Ok(0),
+                    _ => {}
+                }
+
+                if p.inner.lock().killed {
+                    return Err(Interrupted);
+                }
+                let ticks = TICKS.lock();
+                let _ = sleep(&(*ticks) as *const _ as usize, ticks);
+            }
+        }
+    }
+
+    pub fn tcpclose() -> Result<()> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(());
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            let sock = argraw(0);
+
+            crate::net::tcp::socket_get_mut(sock, |socket| {
+                socket.close();
+            })?;
+
+            let p = Cpus::myproc().unwrap();
+            loop {
+                let state = crate::net::tcp::socket_get(sock, |s| s.state())?;
+                if state == crate::net::tcp::State::Closed {
+                    crate::net::tcp::socket_free(sock)?;
+                    return Ok(());
+                }
+
+                if p.inner.lock().killed {
+                    let _ = crate::net::tcp::socket_free(sock);
+                    return Err(Interrupted);
+                }
+                let ticks = TICKS.lock();
+                let _ = sleep(&(*ticks) as *const _ as usize, ticks);
+            }
+        }
+    }
 }
 
 impl SysCalls {
@@ -789,6 +1019,13 @@ impl SysCalls {
             25 => Self::IcmpRecvReply,
             26 => Self::Clocktime,
             27 => Self::DnsResolve,
+            28 => Self::TcpSocket,
+            29 => Self::TcpConnect,
+            30 => Self::TcpListen,
+            31 => Self::TcpSend,
+            32 => Self::TcpRecv,
+            33 => Self::TcpClose,
+            34 => Self::TcpAccept,
             _ => Self::Invalid,
         }
     }

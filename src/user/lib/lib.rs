@@ -70,6 +70,34 @@ pub fn dns_resolve(domain: &str) -> sys::Result<u32> {
     Ok(addr)
 }
 
+pub fn socket() -> sys::Result<usize> {
+    sys::tcpsocket()
+}
+
+pub fn connect(sock: usize, addr: &str, port: u16, local_port: u16) -> sys::Result<()> {
+    sys::tcpconnect(sock, addr.as_bytes(), port, local_port)
+}
+
+pub fn listen(sock: usize, port: u16) -> sys::Result<()> {
+    sys::tcplisten(sock, port)
+}
+
+pub fn accept(sock: usize) -> sys::Result<usize> {
+    sys::tcpaccept(sock)
+}
+
+pub fn send(sock: usize, data: &[u8]) -> sys::Result<usize> {
+    sys::tcpsend(sock, data)
+}
+
+pub fn recv(sock: usize, buf: &mut [u8]) -> sys::Result<usize> {
+    sys::tcprecv(sock, buf)
+}
+
+pub fn close(sock: usize) -> sys::Result<()> {
+    sys::tcpclose(sock)
+}
+
 pub enum ExitCode {
     SUCCESS = 0x0isize,
     FAILURE = 0x1isize,
