@@ -2,22 +2,6 @@
 
 ベースにしたOS: [[https://github.com/o8vm/octox][octox]]
 
-** ファイル構成
-
-#+begin_example
-octox-net/
-├── src/
-│   ├── kernel/
-│   │   ├── net/
-│   │   └── ...
-│   ├── mkfs/
-│   └── user/
-│       ├── bin/
-│       └── lib/
-├── docs/
-└── Makefile
-#+end_example
-
 ** Usage
 
 #+begin_src bash
