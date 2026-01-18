@@ -27,7 +27,8 @@ impl<T: Fn()> Testable for T {
 pub(crate) fn test_runner(tests: &[&dyn Testable]) -> ! {
     #[cfg(target_os = "none")]
     unsafe {
-        crate::uart::init()
+        crate::uart::init();
+        crate::kalloc::init();
     };
 
     println!("running {} tests", tests.len());
