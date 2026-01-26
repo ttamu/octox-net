@@ -54,16 +54,15 @@ fn copy_files(src_dir: &Path, dst_dir: &Path, prefix: Option<&str>) -> io::Resul
         let entry_path = entry.path();
         let dst_path = dst_dir.join(entry.file_name());
         if entry_path.is_dir() {
-            todo!()
-        } else {
-            let should_copy = match (prefix, entry_path.file_name().and_then(|s| s.to_str())) {
-                (Some(prefix), Some(name)) if name.starts_with(prefix) => true,
-                (None, Some(_)) => true,
-                _ => false,
-            };
-            if should_copy {
-                fs::copy(&entry_path, &dst_path)?;
-            }
+            continue;
+        }
+        let should_copy = match (prefix, entry_path.file_name().and_then(|s| s.to_str())) {
+            (Some(prefix), Some(name)) if name.starts_with(prefix) => true,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if should_copy {
+            fs::copy(&entry_path, &dst_path)?;
         }
     }
     Ok(())

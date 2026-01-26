@@ -875,10 +875,27 @@ impl Tcp {
     }
 
     pub fn input(&self, src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
+        crate::trace!(
+            TCP,
+            "[tcp] input: {} bytes from {:?}",
+            data.len(),
+            src_ip.to_bytes()
+        );
+
         let packet = wire::Packet::new_checked(data)?;
         if !packet.verify_checksum(src_ip, dst_ip) {
             return Err(Error::ChecksumError);
         }
+
+        crate::trace!(
+            TCP,
+            "[tcp] packet: sport={} dport={} seq={} ack={} flags=0x{:02x}",
+            packet.src_port(),
+            packet.dst_port(),
+            packet.seq_number(),
+            packet.ack_number(),
+            packet.flags()
+        );
 
         let seg_seq = packet.seq_number();
         let seg_ack = packet.ack_number();

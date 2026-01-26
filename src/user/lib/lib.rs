@@ -3,6 +3,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(internal_features)]
 
+pub mod http;
 pub mod sys {
     use core::arch::asm;
     use fcntl::FcntlCmd;

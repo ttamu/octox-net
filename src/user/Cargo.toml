@@ -94,6 +94,10 @@ path = "bin/nslookup.rs"
 name = "_nc"
 path = "bin/nc.rs"
 
+[[bin]]
+name = "_httpd"
+path = "bin/httpd.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 
