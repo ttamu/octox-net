@@ -2,10 +2,10 @@
 extern crate alloc;
 
 use alloc::string::String;
+use args::{Error, Mode};
 use ulib::io::{Read, Write};
 use ulib::stdio::{stdin, stdout};
 use ulib::{accept, close, connect, env, listen, print, println, recv, send, socket, sys};
-use args::{Error, Mode};
 
 const COLOR_RESET: &str = "\x1b[0m";
 const COLOR_RED: &str = "\x1b[31m";

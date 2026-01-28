@@ -248,7 +248,12 @@ impl ArpCache {
         eth_egress(&mut dev_clone, dst_mac, ETHERTYPE_ARP, &buf)
     }
 
-    fn send_request(&self, dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Result<()> {
+    fn send_request(
+        &self,
+        dev: &mut NetDevice,
+        target_ip: IpAddr,
+        sender_ip: IpAddr,
+    ) -> Result<()> {
         let mut buf = [0u8; wire::PACKET_LEN];
         let mut pkt = wire::PacketMut::new_unchecked(&mut buf);
         pkt.set_htype(ARP_HTYPE_ETHERNET);
