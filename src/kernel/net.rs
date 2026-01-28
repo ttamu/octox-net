@@ -27,3 +27,8 @@ pub fn init() {
 
     crate::println!("[kernel] Network stack initialized");
 }
+
+pub fn poll() {
+    driver::virtio_net::poll_rx();
+    let _ = tcp::poll();
+}

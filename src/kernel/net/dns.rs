@@ -280,7 +280,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
     let mut buf = alloc::vec![0u8; 512];
     let max_attempts = 100;
     for attempt in 0..max_attempts {
-        crate::net::driver::virtio_net::poll_rx();
+        crate::net::poll();
 
         match udp::socket_recvfrom(sockfd, &mut buf) {
             Ok((len, src)) => {

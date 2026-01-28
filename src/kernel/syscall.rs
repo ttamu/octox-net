@@ -809,11 +809,11 @@ impl SysCalls {
                 socket.connect(local_endpoint, remote_endpoint)
             })??;
 
-            let _ = crate::net::tcp::poll();
+            crate::net::poll();
 
             let p = Cpus::myproc().unwrap();
             loop {
-                let _ = crate::net::tcp::poll();
+                crate::net::poll();
 
                 let state = crate::net::tcp::socket_get(sock, |s| s.state())?;
                 match state {
@@ -858,6 +858,7 @@ impl SysCalls {
             let p = Cpus::myproc().unwrap();
             let mut first = true;
             loop {
+                crate::net::poll();
                 let (has_pending, state, local_port) = crate::net::tcp::socket_get(sock, |s| {
                     (
                         s.has_pending_connection(),
@@ -912,7 +913,7 @@ impl SysCalls {
 
             let result = crate::net::tcp::socket_get_mut(sock, |socket| socket.send_slice(&buf))??;
 
-            let _ = crate::net::tcp::poll();
+            crate::net::poll();
 
             Ok(result)
         }
@@ -931,6 +932,7 @@ impl SysCalls {
 
             let p = Cpus::myproc().unwrap();
             loop {
+                crate::net::poll();
                 let (may_recv, state) =
                     crate::net::tcp::socket_get(sock, |s| (s.may_recv(), s.state()))?;
 

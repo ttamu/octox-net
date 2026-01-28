@@ -292,7 +292,7 @@ pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
     let tick_ms = crate::param::TICK_MS as u64;
     let timeout_ticks = timeout_ms.div_ceil(tick_ms);
     loop {
-        crate::net::driver::virtio_net::poll_rx();
+        crate::net::poll();
         if let Some(reply) = {
             let mut q = ICMP_REPLY_QUEUE.lock();
             q.iter()

@@ -278,7 +278,7 @@ pub fn resolve(
 
     let start = *crate::trap::TICKS.lock();
     loop {
-        crate::net::driver::virtio_net::poll_rx();
+        crate::net::poll();
         if let Some(mac) = lookup(target_ip) {
             crate::trace!(
                 ARP,
