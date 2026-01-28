@@ -2,7 +2,6 @@ use super::{
     ip::{egress_route, IpAddr, IpEndpoint, IpHeader},
     util::checksum,
 };
-use crate::net::{device::net_device_by_name, route};
 use crate::{
     error::{Error, Result},
     net::socket::{SocketHandle, SocketSet},
@@ -293,27 +292,6 @@ fn udp_checksum(src: IpAddr, dst: IpAddr, data: &[u8]) -> u16 {
     checksum(&buf)
 }
 
-fn select_src_addr(dst: IpAddr) -> Result<IpAddr> {
-    if dst.0 == IpAddr::LOOPBACK.0 {
-        return Ok(IpAddr::LOOPBACK);
-    }
-    if let Some(route) = route::lookup(dst) {
-        if let Some(dev) = net_device_by_name(route.dev) {
-            if let Some(iface) = dev
-                .interfaces
-                .iter()
-                .find(|i| (dst.0 & i.netmask.0) == (i.addr.0 & i.netmask.0))
-            {
-                return Ok(iface.addr);
-            }
-            if let Some(iface) = dev.interfaces.first() {
-                return Ok(iface.addr);
-            }
-        }
-    }
-    Err(Error::NoSuchNode)
-}
-
 pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     UDP.ingress(src, dst, data)
 }
@@ -337,7 +315,7 @@ pub fn egress(src: IpEndpoint, dst: IpEndpoint, data: &[u8]) -> Result<()> {
     let src_ip = if src.addr.0 != 0 {
         src.addr
     } else {
-        select_src_addr(dst.addr)?
+        super::ip::get_source_address(dst.addr).ok_or(Error::NoSuchNode)?
     };
 
     let csum = udp_checksum(src_ip, dst.addr, &packet);
