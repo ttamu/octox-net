@@ -149,103 +149,172 @@ struct ArpEntry {
     valid: bool,
 }
 
-static ARP_TABLE: Mutex<Vec<ArpEntry>> = Mutex::new(Vec::new(), "arp_table");
-static ARP_CV: Condvar = Condvar::new();
-
-fn lookup(ip: IpAddr) -> Option<MacAddr> {
-    let table = ARP_TABLE.lock();
-    table
-        .iter()
-        .find(|e| e.valid && e.ip.0 == ip.0)
-        .map(|e| e.mac)
+struct ArpCache {
+    table: Mutex<Vec<ArpEntry>>,
+    cv: Condvar,
 }
 
-fn insert(ip: IpAddr, mac: MacAddr) {
-    {
-        let mut table = ARP_TABLE.lock();
-        if let Some(e) = table.iter_mut().find(|e| e.ip.0 == ip.0) {
-            e.mac = mac;
-            e.valid = true;
-        } else {
-            table.push(ArpEntry {
-                ip,
-                mac,
-                valid: true,
-            });
+impl ArpCache {
+    const fn new() -> Self {
+        Self {
+            table: Mutex::new(Vec::new(), "arp_table"),
+            cv: Condvar::new(),
         }
     }
-    crate::trace!(ARP, "[arp] insert {:?} -> {}", ip.to_bytes(), mac);
-    ARP_CV.notify_all();
-}
 
-pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
-    let pkt = wire::Packet::new_checked(data)?;
-    if pkt.htype() != ARP_HTYPE_ETHERNET
-        || pkt.ptype() != ARP_PTYPE_IPV4
-        || pkt.hlen() != ARP_HLEN_ETH
-        || pkt.plen() != ARP_PLEN_IPV4
-    {
-        return Err(Error::UnsupportedProtocol);
+    fn lookup(&self, ip: IpAddr) -> Option<MacAddr> {
+        let table = self.table.lock();
+        table
+            .iter()
+            .find(|e| e.valid && e.ip.0 == ip.0)
+            .map(|e| e.mac)
     }
-    let oper = pkt.oper();
-    let sender_ip = IpAddr(pkt.spa());
-    let sender_mac = MacAddr(pkt.sha());
-    let target_ip = IpAddr(pkt.tpa());
 
-    crate::trace!(
-        ARP,
-        "[arp] oper={} sender={:?} target={:?}",
-        oper,
-        sender_ip.to_bytes(),
-        target_ip.to_bytes()
-    );
-
-    match oper {
-        ARP_OP_REPLY => {
-            crate::trace!(ARP, "[arp] reply from {:?}", sender_ip.to_bytes());
-            insert(sender_ip, sender_mac);
-        }
-        ARP_OP_REQUEST => {
-            if let Some(iface) = dev.interfaces.iter().find(|i| i.addr.0 == target_ip.0) {
-                send_reply(dev, sender_mac, sender_ip, iface.addr)?;
+    fn insert(&self, ip: IpAddr, mac: MacAddr) {
+        {
+            let mut table = self.table.lock();
+            if let Some(e) = table.iter_mut().find(|e| e.ip.0 == ip.0) {
+                e.mac = mac;
+                e.valid = true;
+            } else {
+                table.push(ArpEntry {
+                    ip,
+                    mac,
+                    valid: true,
+                });
             }
         }
-        _ => {}
+        crate::trace!(ARP, "[arp] insert {:?} -> {}", ip.to_bytes(), mac);
+        self.cv.notify_all();
     }
-    Ok(())
+
+    fn ingress(&self, dev: &NetDevice, data: &[u8]) -> Result<()> {
+        let pkt = wire::Packet::new_checked(data)?;
+        if pkt.htype() != ARP_HTYPE_ETHERNET
+            || pkt.ptype() != ARP_PTYPE_IPV4
+            || pkt.hlen() != ARP_HLEN_ETH
+            || pkt.plen() != ARP_PLEN_IPV4
+        {
+            return Err(Error::UnsupportedProtocol);
+        }
+        let oper = pkt.oper();
+        let sender_ip = IpAddr(pkt.spa());
+        let sender_mac = MacAddr(pkt.sha());
+        let target_ip = IpAddr(pkt.tpa());
+
+        crate::trace!(
+            ARP,
+            "[arp] oper={} sender={:?} target={:?}",
+            oper,
+            sender_ip.to_bytes(),
+            target_ip.to_bytes()
+        );
+
+        match oper {
+            ARP_OP_REPLY => {
+                crate::trace!(ARP, "[arp] reply from {:?}", sender_ip.to_bytes());
+                self.insert(sender_ip, sender_mac);
+            }
+            ARP_OP_REQUEST => {
+                if let Some(iface) = dev.interfaces.iter().find(|i| i.addr.0 == target_ip.0) {
+                    self.send_reply(dev, sender_mac, sender_ip, iface.addr)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn send_reply(
+        &self,
+        dev: &NetDevice,
+        dst_mac: MacAddr,
+        dst_ip: IpAddr,
+        src_ip: IpAddr,
+    ) -> Result<()> {
+        let mut buf = [0u8; wire::PACKET_LEN];
+        let mut pkt = wire::PacketMut::new_unchecked(&mut buf);
+        pkt.set_htype(ARP_HTYPE_ETHERNET);
+        pkt.set_ptype(ARP_PTYPE_IPV4);
+        pkt.set_hlen(ARP_HLEN_ETH);
+        pkt.set_plen(ARP_PLEN_IPV4);
+        pkt.set_oper(ARP_OP_REPLY);
+        pkt.set_sha(dev.hw_addr.0);
+        pkt.set_spa(src_ip.0);
+        pkt.set_tha(dst_mac.0);
+        pkt.set_tpa(dst_ip.0);
+
+        let mut dev_clone = dev.clone();
+        eth_egress(&mut dev_clone, dst_mac, ETHERTYPE_ARP, &buf)
+    }
+
+    fn send_request(&self, dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Result<()> {
+        let mut buf = [0u8; wire::PACKET_LEN];
+        let mut pkt = wire::PacketMut::new_unchecked(&mut buf);
+        pkt.set_htype(ARP_HTYPE_ETHERNET);
+        pkt.set_ptype(ARP_PTYPE_IPV4);
+        pkt.set_hlen(ARP_HLEN_ETH);
+        pkt.set_plen(ARP_PLEN_IPV4);
+        pkt.set_oper(ARP_OP_REQUEST);
+        pkt.set_sha(dev.hw_addr.0);
+        pkt.set_spa(sender_ip.0);
+        pkt.set_tha([0; 6]);
+        pkt.set_tpa(target_ip.0);
+
+        eth_egress(dev, MacAddr::BROADCAST, ETHERTYPE_ARP, &buf)
+    }
+
+    fn resolve(
+        &self,
+        dev_name: &str,
+        target_ip: IpAddr,
+        sender_ip: IpAddr,
+        timeout_ticks: usize,
+    ) -> Result<MacAddr> {
+        if let Some(mac) = self.lookup(target_ip) {
+            crate::trace!(ARP, "[arp] cache hit {:?}", mac);
+            return Ok(mac);
+        }
+
+        crate::net::device::net_device_with_mut(dev_name, |dev| {
+            if !dev.flags().contains(NetDeviceFlags::UP) {
+                return Err(Error::NotConnected);
+            }
+            crate::trace!(
+                ARP,
+                "[arp] send request who-has {:?} tell {:?}",
+                target_ip.to_bytes(),
+                sender_ip.to_bytes()
+            );
+            self.send_request(dev, target_ip, sender_ip)
+        })??;
+
+        let start = *crate::trap::TICKS.lock();
+        loop {
+            crate::net::poll();
+            if let Some(mac) = self.lookup(target_ip) {
+                crate::trace!(
+                    ARP,
+                    "[arp] resolved {:?} -> {:02x?}",
+                    target_ip.to_bytes(),
+                    mac
+                );
+                return Ok(mac);
+            }
+            let elapsed = *crate::trap::TICKS.lock() - start;
+            if elapsed > timeout_ticks {
+                crate::trace!(ARP, "[arp] timeout waiting reply");
+                return Err(Error::Timeout);
+            }
+            crate::proc::yielding();
+        }
+    }
 }
 
-fn send_reply(dev: &NetDevice, dst_mac: MacAddr, dst_ip: IpAddr, src_ip: IpAddr) -> Result<()> {
-    let mut buf = [0u8; wire::PACKET_LEN];
-    let mut pkt = wire::PacketMut::new_unchecked(&mut buf);
-    pkt.set_htype(ARP_HTYPE_ETHERNET);
-    pkt.set_ptype(ARP_PTYPE_IPV4);
-    pkt.set_hlen(ARP_HLEN_ETH);
-    pkt.set_plen(ARP_PLEN_IPV4);
-    pkt.set_oper(ARP_OP_REPLY);
-    pkt.set_sha(dev.hw_addr.0);
-    pkt.set_spa(src_ip.0);
-    pkt.set_tha(dst_mac.0);
-    pkt.set_tpa(dst_ip.0);
+static ARP: ArpCache = ArpCache::new();
 
-    let mut dev_clone = dev.clone();
-    eth_egress(&mut dev_clone, dst_mac, ETHERTYPE_ARP, &buf)
-}
-
-fn send_request(dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Result<()> {
-    let mut buf = [0u8; wire::PACKET_LEN];
-    let mut pkt = wire::PacketMut::new_unchecked(&mut buf);
-    pkt.set_htype(ARP_HTYPE_ETHERNET);
-    pkt.set_ptype(ARP_PTYPE_IPV4);
-    pkt.set_hlen(ARP_HLEN_ETH);
-    pkt.set_plen(ARP_PLEN_IPV4);
-    pkt.set_oper(ARP_OP_REQUEST);
-    pkt.set_sha(dev.hw_addr.0);
-    pkt.set_spa(sender_ip.0);
-    pkt.set_tha([0; 6]);
-    pkt.set_tpa(target_ip.0);
-
-    eth_egress(dev, MacAddr::BROADCAST, ETHERTYPE_ARP, &buf)
+pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
+    ARP.ingress(dev, data)
 }
 
 pub fn resolve(
@@ -254,47 +323,7 @@ pub fn resolve(
     sender_ip: IpAddr,
     timeout_ticks: usize,
 ) -> Result<MacAddr> {
-    if let Some(mac) = lookup(target_ip) {
-        crate::trace!(ARP, "[arp] cache hit {:?}", mac);
-        return Ok(mac);
-    }
-    {
-        let mut list = crate::net::device::NET_DEVICES.lock();
-        let dev = list
-            .iter_mut()
-            .find(|d| d.name() == dev_name)
-            .ok_or(Error::DeviceNotFound)?;
-        if !dev.flags().contains(NetDeviceFlags::UP) {
-            return Err(Error::NotConnected);
-        }
-        crate::trace!(
-            ARP,
-            "[arp] send request who-has {:?} tell {:?}",
-            target_ip.to_bytes(),
-            sender_ip.to_bytes()
-        );
-        send_request(dev, target_ip, sender_ip)?;
-    }
-
-    let start = *crate::trap::TICKS.lock();
-    loop {
-        crate::net::poll();
-        if let Some(mac) = lookup(target_ip) {
-            crate::trace!(
-                ARP,
-                "[arp] resolved {:?} -> {:02x?}",
-                target_ip.to_bytes(),
-                mac
-            );
-            return Ok(mac);
-        }
-        let elapsed = *crate::trap::TICKS.lock() - start;
-        if elapsed > timeout_ticks {
-            crate::trace!(ARP, "[arp] timeout waiting reply");
-            return Err(Error::Timeout);
-        }
-        crate::proc::yielding();
-    }
+    ARP.resolve(dev_name, target_ip, sender_ip, timeout_ticks)
 }
 
 #[cfg(test)]

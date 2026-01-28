@@ -10,33 +10,52 @@ pub struct Route {
     pub dev: &'static str,
 }
 
-static ROUTES: Mutex<[Option<Route>; 8]> =
-    Mutex::new([None, None, None, None, None, None, None, None], "routes");
+struct RouteTable {
+    routes: Mutex<[Option<Route>; 8]>,
+}
 
-pub fn add_route(route: Route) -> Result<()> {
-    let mut routes = ROUTES.lock();
-    for slot in routes.iter_mut() {
-        if slot.is_none() {
-            *slot = Some(route);
-            return Ok(());
+impl RouteTable {
+    const fn new() -> Self {
+        Self {
+            routes: Mutex::new([None, None, None, None, None, None, None, None], "routes"),
         }
     }
-    Err(Error::StorageFull)
+
+    fn add_route(&self, route: Route) -> Result<()> {
+        let mut routes = self.routes.lock();
+        for slot in routes.iter_mut() {
+            if slot.is_none() {
+                *slot = Some(route);
+                return Ok(());
+            }
+        }
+        Err(Error::StorageFull)
+    }
+
+    fn lookup(&self, dst: IpAddr) -> Option<Route> {
+        let routes = self.routes.lock();
+        let mut best: Option<Route> = None;
+        for r in routes.iter().flatten() {
+            if (dst.0 & r.mask.0) == (r.dest.0 & r.mask.0)
+                && best
+                    .map(|b| mask_len(r.mask) > mask_len(b.mask))
+                    .unwrap_or(true)
+            {
+                best = Some(*r);
+            }
+        }
+        best
+    }
+}
+
+static ROUTES: RouteTable = RouteTable::new();
+
+pub fn add_route(route: Route) -> Result<()> {
+    ROUTES.add_route(route)
 }
 
 pub fn lookup(dst: IpAddr) -> Option<Route> {
-    let routes = ROUTES.lock();
-    let mut best: Option<Route> = None;
-    for r in routes.iter().flatten() {
-        if (dst.0 & r.mask.0) == (r.dest.0 & r.mask.0)
-            && best
-                .map(|b| mask_len(r.mask) > mask_len(b.mask))
-                .unwrap_or(true)
-        {
-            best = Some(*r);
-        }
-    }
-    best
+    ROUTES.lookup(dst)
 }
 
 fn mask_len(mask: IpAddr) -> u32 {

@@ -20,6 +20,18 @@ pub enum IcmpType {
     TimeExceeded = 11,
 }
 
+impl IcmpType {
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::EchoReply),
+            3 => Some(Self::DestinationUnreachable),
+            8 => Some(Self::EchoRequest),
+            11 => Some(Self::TimeExceeded),
+            _ => None,
+        }
+    }
+}
+
 mod wire {
     use crate::error::{Error, Result};
     use crate::net::util::{read_u16, write_u16};
@@ -134,134 +146,231 @@ pub struct IcmpReply {
     pub timestamp: usize,
 }
 
-static ICMP_REPLY_QUEUE: Mutex<VecDeque<IcmpReply>> = Mutex::new(VecDeque::new(), "icmp_queue");
-static ICMP_REPLY_CV: Condvar = Condvar::new();
-
 use super::ip;
 
-pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
-    if !verify_checksum(data) {
-        return Err(Error::ChecksumError);
+struct IcmpCore {
+    replies: Mutex<VecDeque<IcmpReply>>,
+    cv: Condvar,
+}
+
+impl IcmpCore {
+    const fn new() -> Self {
+        Self {
+            replies: Mutex::new(VecDeque::new(), "icmp_queue"),
+            cv: Condvar::new(),
+        }
     }
 
-    let echo = wire::Echo::new_checked(data)?;
-    let id = echo.id();
-    let seq = echo.seq();
-    let payload = &data[wire::ECHO_HEADER_LEN..];
-
-    match echo.msg_type() {
-        t if t == IcmpType::EchoRequest as u8 => {
-            crate::trace!(
-                ICMP,
-                "[icmp] Received Echo Request from {:?}, id={}, seq={}",
-                src.to_bytes(),
-                id,
-                seq
-            );
-            echo_reply(dst, src, id, seq, payload)
+    fn ingress(&self, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+        if !verify_checksum(data) {
+            return Err(Error::ChecksumError);
         }
-        t if t == IcmpType::EchoReply as u8 => {
-            crate::trace!(
-                ICMP,
-                "[icmp] Received Echo Reply from {:?}, id={}, seq={}",
-                src.to_bytes(),
-                id,
-                seq
-            );
-            notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
+
+        let echo = wire::Echo::new_checked(data)?;
+        let id = echo.id();
+        let seq = echo.seq();
+        let payload = &data[wire::ECHO_HEADER_LEN..];
+
+        match IcmpType::from_u8(echo.msg_type()) {
+            Some(IcmpType::EchoRequest) => self.handle_echo_request(dst, src, id, seq, payload),
+            Some(IcmpType::EchoReply) => self.handle_echo_reply(src, id, seq, payload),
+            Some(IcmpType::DestinationUnreachable) => {
+                self.handle_unreachable(src, echo.code(), payload)
+            }
+            Some(IcmpType::TimeExceeded) => Err(Error::UnsupportedProtocol),
+            None => Err(Error::UnsupportedProtocol),
         }
-        t if t == IcmpType::DestinationUnreachable as u8 => {
-            let code = echo.code();
+    }
 
-            if payload.len() < 28 {
-                return Err(Error::PacketTooShort);
-            }
+    fn handle_echo_request(
+        &self,
+        dst: IpAddr,
+        src: IpAddr,
+        id: u16,
+        seq: u16,
+        payload: &[u8],
+    ) -> Result<()> {
+        crate::trace!(
+            ICMP,
+            "[icmp] Received Echo Request from {:?}, id={}, seq={}",
+            src.to_bytes(),
+            id,
+            seq
+        );
+        self.echo_reply(dst, src, id, seq, payload)
+    }
 
-            let inner_ip_hdr = &payload[..20];
-            let inner_protocol = inner_ip_hdr[9];
+    fn handle_echo_reply(&self, src: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
+        crate::trace!(
+            ICMP,
+            "[icmp] Received Echo Reply from {:?}, id={}, seq={}",
+            src.to_bytes(),
+            id,
+            seq
+        );
+        self.notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
+    }
 
-            if inner_protocol != IpHeader::ICMP {
-                return Err(Error::UnsupportedProtocol);
-            }
+    fn handle_unreachable(&self, src: IpAddr, code: u8, payload: &[u8]) -> Result<()> {
+        let (orig_id, orig_seq) = self.parse_unreachable(payload)?;
+        crate::trace!(
+            ICMP,
+            "[icmp] Destination Unreachable code={} for id={}, seq={}",
+            code,
+            orig_id,
+            orig_seq
+        );
+        self.notify_reply(
+            src,
+            orig_id,
+            orig_seq,
+            payload,
+            IcmpReplyKind::Unreachable(code),
+        )
+    }
 
-            let inner_icmp = &payload[20..];
-            if inner_icmp.len() < wire::ECHO_HEADER_LEN {
-                return Err(Error::UnsupportedProtocol);
-            }
+    fn parse_unreachable(&self, payload: &[u8]) -> Result<(u16, u16)> {
+        if payload.len() < 28 {
+            return Err(Error::PacketTooShort);
+        }
 
-            let orig_id = u16::from_be_bytes([inner_icmp[4], inner_icmp[5]]);
-            let orig_seq = u16::from_be_bytes([inner_icmp[6], inner_icmp[7]]);
-            crate::trace!(
-                ICMP,
-                "[icmp] Destination Unreachable code={} for id={}, seq={}",
-                code,
-                orig_id,
-                orig_seq
-            );
-            notify_reply(
+        let inner_ip_hdr = &payload[..20];
+        let inner_protocol = inner_ip_hdr[9];
+
+        if inner_protocol != IpHeader::ICMP {
+            return Err(Error::UnsupportedProtocol);
+        }
+
+        let inner_icmp = &payload[20..];
+        if inner_icmp.len() < wire::ECHO_HEADER_LEN {
+            return Err(Error::UnsupportedProtocol);
+        }
+
+        let orig_id = u16::from_be_bytes([inner_icmp[4], inner_icmp[5]]);
+        let orig_seq = u16::from_be_bytes([inner_icmp[6], inner_icmp[7]]);
+        Ok((orig_id, orig_seq))
+    }
+
+    fn echo_reply(
+        &self,
+        src: IpAddr,
+        dst: IpAddr,
+        id: u16,
+        seq: u16,
+        payload: &[u8],
+    ) -> Result<()> {
+        let total_len = wire::ECHO_HEADER_LEN + payload.len();
+        let mut packet = vec![0u8; total_len];
+
+        {
+            let mut echo = wire::EchoMut::new_unchecked(&mut packet);
+            echo.set_msg_type(IcmpType::EchoReply as u8);
+            echo.set_code(0);
+            echo.set_checksum(0);
+            echo.set_id(id);
+            echo.set_seq(seq);
+            echo.payload_mut().copy_from_slice(payload);
+        }
+        let csum = checksum(&packet);
+        write_u16(&mut packet[2..4], csum);
+
+        crate::trace!(
+            ICMP,
+            "[icmp] Sending Echo Reply to {:?}, id={}, seq={}",
+            dst.to_bytes(),
+            id,
+            seq
+        );
+
+        let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
+        egress(&dev, IpHeader::ICMP, src, dst, &packet)
+    }
+
+    fn echo_request(&self, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
+        let total_len = wire::ECHO_HEADER_LEN + payload.len();
+        let mut packet = vec![0u8; total_len];
+        {
+            let mut echo = wire::EchoMut::new_unchecked(&mut packet);
+            echo.set_msg_type(IcmpType::EchoRequest as u8);
+            echo.set_code(0);
+            echo.set_checksum(0);
+            echo.set_id(id);
+            echo.set_seq(seq);
+            echo.payload_mut().copy_from_slice(payload);
+        }
+        let csum = checksum(&packet);
+        write_u16(&mut packet[2..4], csum);
+
+        crate::trace!(
+            ICMP,
+            "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
+            dst.to_bytes(),
+            id,
+            seq
+        );
+
+        ip::egress_route(dst, IpHeader::ICMP, &packet)
+    }
+
+    fn notify_reply(
+        &self,
+        src: IpAddr,
+        id: u16,
+        seq: u16,
+        payload: &[u8],
+        kind: IcmpReplyKind,
+    ) -> Result<()> {
+        {
+            let mut q = self.replies.lock();
+            let now = *crate::trap::TICKS.lock();
+            q.push_back(IcmpReply {
                 src,
-                orig_id,
-                orig_seq,
-                payload,
-                IcmpReplyKind::Unreachable(code),
-            )
+                id,
+                seq,
+                payload: payload.to_vec(),
+                kind,
+                timestamp: now,
+            });
         }
-        _ => Err(Error::UnsupportedProtocol),
+        self.cv.notify_all();
+        Ok(())
     }
+
+    fn recv_reply(&self, id: u16, timeout_ms: u64) -> Result<IcmpReply> {
+        let start = *crate::trap::TICKS.lock();
+        let tick_ms = crate::param::TICK_MS as u64;
+        let timeout_ticks = timeout_ms.div_ceil(tick_ms);
+        loop {
+            crate::net::poll();
+            if let Some(reply) = {
+                let mut q = self.replies.lock();
+                q.iter()
+                    .position(|r| r.id == id)
+                    .map(|pos| q.remove(pos).unwrap())
+            } {
+                return Ok(reply);
+            }
+            let elapsed = *crate::trap::TICKS.lock() - start;
+            if (elapsed as u64) >= timeout_ticks {
+                return Err(Error::Timeout);
+            }
+            crate::proc::yielding();
+        }
+    }
+}
+
+static ICMP: IcmpCore = IcmpCore::new();
+
+pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+    ICMP.ingress(src, dst, data)
 }
 
 pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    let total_len = wire::ECHO_HEADER_LEN + payload.len();
-    let mut packet = vec![0u8; total_len];
-
-    {
-        let mut echo = wire::EchoMut::new_unchecked(&mut packet);
-        echo.set_msg_type(IcmpType::EchoReply as u8);
-        echo.set_code(0);
-        echo.set_checksum(0);
-        echo.set_id(id);
-        echo.set_seq(seq);
-        echo.payload_mut().copy_from_slice(payload);
-    }
-    let csum = checksum(&packet);
-    write_u16(&mut packet[2..4], csum);
-
-    crate::trace!(
-        ICMP,
-        "[icmp] Sending Echo Reply to {:?}, id={}, seq={}",
-        dst.to_bytes(),
-        id,
-        seq
-    );
-
-    let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-    egress(&dev, IpHeader::ICMP, src, dst, &packet)
+    ICMP.echo_reply(src, dst, id, seq, payload)
 }
 
 pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    let total_len = wire::ECHO_HEADER_LEN + payload.len();
-    let mut packet = vec![0u8; total_len];
-    {
-        let mut echo = wire::EchoMut::new_unchecked(&mut packet);
-        echo.set_msg_type(IcmpType::EchoRequest as u8);
-        echo.set_code(0);
-        echo.set_checksum(0);
-        echo.set_id(id);
-        echo.set_seq(seq);
-        echo.payload_mut().copy_from_slice(payload);
-    }
-    let csum = checksum(&packet);
-    write_u16(&mut packet[2..4], csum);
-
-    crate::trace!(
-        ICMP,
-        "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
-        dst.to_bytes(),
-        id,
-        seq
-    );
-
-    ip::egress_route(dst, IpHeader::ICMP, &packet)
+    ICMP.echo_request(dst, id, seq, payload)
 }
 
 pub fn notify_reply(
@@ -271,42 +380,11 @@ pub fn notify_reply(
     payload: &[u8],
     kind: IcmpReplyKind,
 ) -> Result<()> {
-    {
-        let mut q = ICMP_REPLY_QUEUE.lock();
-        let now = *crate::trap::TICKS.lock();
-        q.push_back(IcmpReply {
-            src,
-            id,
-            seq,
-            payload: payload.to_vec(),
-            kind,
-            timestamp: now,
-        });
-    }
-    ICMP_REPLY_CV.notify_all();
-    Ok(())
+    ICMP.notify_reply(src, id, seq, payload, kind)
 }
 
 pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
-    let start = *crate::trap::TICKS.lock();
-    let tick_ms = crate::param::TICK_MS as u64;
-    let timeout_ticks = timeout_ms.div_ceil(tick_ms);
-    loop {
-        crate::net::poll();
-        if let Some(reply) = {
-            let mut q = ICMP_REPLY_QUEUE.lock();
-            q.iter()
-                .position(|r| r.id == id)
-                .map(|pos| q.remove(pos).unwrap())
-        } {
-            return Ok(reply);
-        }
-        let elapsed = *crate::trap::TICKS.lock() - start;
-        if (elapsed as u64) >= timeout_ticks {
-            return Err(Error::Timeout);
-        }
-        crate::proc::yielding();
-    }
+    ICMP.recv_reply(id, timeout_ms)
 }
 
 #[cfg(test)]

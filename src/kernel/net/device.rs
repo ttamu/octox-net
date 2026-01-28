@@ -170,42 +170,80 @@ impl Clone for NetDevice {
     }
 }
 
-pub(crate) static NET_DEVICES: Mutex<Vec<NetDevice>> = Mutex::new(Vec::new(), "net_devices");
-
-pub fn net_device_register(device: NetDevice) -> Result<()> {
-    let mut list = NET_DEVICES.lock();
-    list.push(device);
-    Ok(())
+struct NetDeviceRegistry {
+    devices: Mutex<Vec<NetDevice>>,
 }
 
-pub fn net_device_with_mut<F, R>(name: &str, mut f: F) -> Result<R>
+impl NetDeviceRegistry {
+    const fn new() -> Self {
+        Self {
+            devices: Mutex::new(Vec::new(), "net_devices"),
+        }
+    }
+
+    fn register(&self, device: NetDevice) -> Result<()> {
+        let mut list = self.devices.lock();
+        list.push(device);
+        Ok(())
+    }
+
+    fn with_mut<F, R>(&self, name: &str, mut f: F) -> Result<R>
+    where
+        F: FnMut(&mut NetDevice) -> R,
+    {
+        let mut list = self.devices.lock();
+        let dev = list
+            .iter_mut()
+            .find(|d| d.name() == name)
+            .ok_or(Error::DeviceNotFound)?;
+        Ok(f(dev))
+    }
+
+    fn by_name(&self, name: &str) -> Option<NetDevice> {
+        let list = self.devices.lock();
+        list.iter().find(|d| d.name() == name).cloned()
+    }
+
+    fn by_index(&self, index: usize) -> Option<NetDevice> {
+        let list = self.devices.lock();
+        list.get(index).cloned()
+    }
+
+    fn foreach<F>(&self, mut f: F)
+    where
+        F: FnMut(&NetDevice),
+    {
+        let list = self.devices.lock();
+        for dev in list.iter() {
+            f(dev);
+        }
+    }
+}
+
+static NET_DEVICES: NetDeviceRegistry = NetDeviceRegistry::new();
+
+pub fn net_device_register(device: NetDevice) -> Result<()> {
+    NET_DEVICES.register(device)
+}
+
+pub fn net_device_with_mut<F, R>(name: &str, f: F) -> Result<R>
 where
     F: FnMut(&mut NetDevice) -> R,
 {
-    let mut list = NET_DEVICES.lock();
-    let dev = list
-        .iter_mut()
-        .find(|d| d.name() == name)
-        .ok_or(Error::DeviceNotFound)?;
-    Ok(f(dev))
+    NET_DEVICES.with_mut(name, f)
 }
 
 pub fn net_device_by_name(name: &str) -> Option<NetDevice> {
-    let list = NET_DEVICES.lock();
-    list.iter().find(|d| d.name() == name).cloned()
+    NET_DEVICES.by_name(name)
 }
 
 pub fn net_device_by_index(index: usize) -> Option<NetDevice> {
-    let list = NET_DEVICES.lock();
-    list.get(index).cloned()
+    NET_DEVICES.by_index(index)
 }
 
-pub fn net_device_foreach<F>(mut f: F)
+pub fn net_device_foreach<F>(f: F)
 where
     F: FnMut(&NetDevice),
 {
-    let list = NET_DEVICES.lock();
-    for dev in list.iter() {
-        f(dev);
-    }
+    NET_DEVICES.foreach(f)
 }
