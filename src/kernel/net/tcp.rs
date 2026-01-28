@@ -363,7 +363,7 @@ impl Socket {
         self.snd_una = self.iss;
         self.snd_nxt = self.iss + 1;
         self.state = State::SynSent;
-        let _ = self.output(wire::field::FLG_SYN, &[]);
+        let _ = self.egress(wire::field::FLG_SYN, &[]);
         Ok(())
     }
 
@@ -402,12 +402,12 @@ impl Socket {
                 self.state = State::Closed;
             }
             State::SynReceived | State::Established => {
-                let _ = self.output(wire::field::FLG_ACK | wire::field::FLG_FIN, &[]);
+                let _ = self.egress(wire::field::FLG_ACK | wire::field::FLG_FIN, &[]);
                 self.snd_nxt = self.snd_nxt.wrapping_add(1);
                 self.state = State::FinWait1;
             }
             State::CloseWait => {
-                let _ = self.output(wire::field::FLG_ACK | wire::field::FLG_FIN, &[]);
+                let _ = self.egress(wire::field::FLG_ACK | wire::field::FLG_FIN, &[]);
                 self.snd_nxt = self.snd_nxt.wrapping_add(1);
                 self.state = State::LastAck;
             }
@@ -446,7 +446,7 @@ impl Socket {
         processor.run();
     }
 
-    fn output(&mut self, flags: u8, payload: &[u8]) -> Result<()> {
+    fn egress(&mut self, flags: u8, payload: &[u8]) -> Result<()> {
         let mut seq = self.snd_nxt;
         if (flags & wire::field::FLG_SYN) != 0 {
             seq = self.iss;
@@ -503,7 +503,7 @@ impl Socket {
                     payload.push(b);
                 }
             }
-            let _ = self.output(wire::field::FLG_ACK | wire::field::FLG_PSH, &payload);
+            let _ = self.egress(wire::field::FLG_ACK | wire::field::FLG_PSH, &payload);
             self.snd_nxt = self.snd_nxt.wrapping_add(to_send as u32);
             window_available = window_available.saturating_sub(to_send as u32);
         }
@@ -643,7 +643,7 @@ impl<'a> SegmentProcessor<'a> {
         self.handle_fin();
 
         if self.send_ack {
-            let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+            let _ = self.sock.egress(wire::field::FLG_ACK, &[]);
         }
     }
 
@@ -685,12 +685,12 @@ impl<'a> SegmentProcessor<'a> {
 
             if self.seg.has_ack() && Self::seq_lt(self.sock.iss, self.sock.snd_una) {
                 self.sock.state = State::Established;
-                let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+                let _ = self.sock.egress(wire::field::FLG_ACK, &[]);
             } else {
                 self.sock.state = State::SynReceived;
                 let _ = self
                     .sock
-                    .output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
+                    .egress(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
             }
         }
 
@@ -703,7 +703,7 @@ impl<'a> SegmentProcessor<'a> {
         }
         let _ = self
             .sock
-            .output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
+            .egress(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
         true
     }
 
@@ -890,7 +890,7 @@ impl<'a> SegmentProcessor<'a> {
 
     fn accept_or_ack(&mut self, acceptable: bool) -> bool {
         if !acceptable && !self.seg.has_rst() {
-            let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+            let _ = self.sock.egress(wire::field::FLG_ACK, &[]);
         }
         acceptable
     }
@@ -1006,10 +1006,10 @@ impl Tcp {
         Ok(child_index)
     }
 
-    pub fn input(&self, src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
+    pub fn ingress(&self, src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
         crate::trace!(
             TCP,
-            "[tcp] input: {} bytes from {:?}",
+            "[tcp] ingress: {} bytes from {:?}",
             data.len(),
             src_ip.to_bytes()
         );
@@ -1188,7 +1188,7 @@ impl Tcp {
 
             let handle = sockets.alloc(child)?;
             let child = sockets.get_mut(handle).unwrap();
-            let _ = child.output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
+            let _ = child.egress(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
             child.drain_pending(sends);
         }
 
@@ -1250,7 +1250,7 @@ impl Tcp {
             packet.fill_checksum(req.local.addr, req.foreign.addr);
         }
 
-        ip::output_route(req.foreign.addr, wire::PROTOCOL_TCP, &buf)?;
+        ip::egress_route(req.foreign.addr, wire::PROTOCOL_TCP, &buf)?;
         Ok(())
     }
 }
@@ -1283,8 +1283,8 @@ pub fn socket_accept(listen_index: usize) -> Result<usize> {
     TCP.socket_accept(listen_index)
 }
 
-pub fn input(src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
-    TCP.input(src_ip, dst_ip, data)
+pub fn ingress(src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
+    TCP.ingress(src_ip, dst_ip, data)
 }
 
 pub fn poll() -> Result<()> {

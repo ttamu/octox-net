@@ -2,7 +2,7 @@ extern crate alloc;
 use crate::condvar::Condvar;
 use crate::error::{Error, Result};
 use crate::net::device::{NetDevice, NetDeviceFlags};
-use crate::net::ethernet::{output as eth_output, MacAddr, ETHERTYPE_ARP};
+use crate::net::ethernet::{egress as eth_egress, MacAddr, ETHERTYPE_ARP};
 use crate::net::ip::IpAddr;
 use crate::spinlock::Mutex;
 use alloc::vec::Vec;
@@ -178,7 +178,7 @@ fn insert(ip: IpAddr, mac: MacAddr) {
     ARP_CV.notify_all();
 }
 
-pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
+pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
     let pkt = wire::Packet::new_checked(data)?;
     if pkt.htype() != ARP_HTYPE_ETHERNET
         || pkt.ptype() != ARP_PTYPE_IPV4
@@ -229,7 +229,7 @@ fn send_reply(dev: &NetDevice, dst_mac: MacAddr, dst_ip: IpAddr, src_ip: IpAddr)
     pkt.set_tpa(dst_ip.0);
 
     let mut dev_clone = dev.clone();
-    eth_output(&mut dev_clone, dst_mac, ETHERTYPE_ARP, &buf)
+    eth_egress(&mut dev_clone, dst_mac, ETHERTYPE_ARP, &buf)
 }
 
 fn send_request(dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Result<()> {
@@ -245,7 +245,7 @@ fn send_request(dev: &mut NetDevice, target_ip: IpAddr, sender_ip: IpAddr) -> Re
     pkt.set_tha([0; 6]);
     pkt.set_tpa(target_ip.0);
 
-    eth_output(dev, MacAddr::BROADCAST, ETHERTYPE_ARP, &buf)
+    eth_egress(dev, MacAddr::BROADCAST, ETHERTYPE_ARP, &buf)
 }
 
 pub fn resolve(

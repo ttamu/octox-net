@@ -121,20 +121,20 @@ impl EthHeader {
 pub const ETHERTYPE_ARP: u16 = 0x0806;
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
 
-pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
+pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
     let frame = wire::Frame::new_checked(data)?;
     let etype = frame.ethertype();
 
     crate::trace!(
         ETHER,
-        "[ether] input: ethertype=0x{:04x}, len={}",
+        "[ether] ingress: ethertype=0x{:04x}, len={}",
         etype,
         data.len()
     );
 
     let payload = frame.payload();
     match etype {
-        ETHERTYPE_ARP => crate::net::arp::input(dev, payload),
+        ETHERTYPE_ARP => crate::net::arp::ingress(dev, payload),
         ETHERTYPE_IPV4 => net_protocol_handler(dev, ProtocolType::IP, payload),
         _ => {
             crate::trace!(ETHER, "[ether] unsupported ethertype: 0x{:04x}", etype);
@@ -143,7 +143,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
     }
 }
 
-pub fn output(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[u8]) -> Result<()> {
+pub fn egress(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[u8]) -> Result<()> {
     if !dev.flags().contains(NetDeviceFlags::UP) {
         return Err(Error::NotConnected);
     }
@@ -157,7 +157,7 @@ pub fn output(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
     }
     crate::trace!(
         ETHER,
-        "[ether] output: dst={:02x?} type=0x{:04x} len={}",
+        "[ether] egress: dst={:02x?} type=0x{:04x} len={}",
         dst_mac.0,
         ethertype,
         frame.len()

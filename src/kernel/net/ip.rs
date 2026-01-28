@@ -216,7 +216,7 @@ impl IpEndpoint {
     }
 }
 
-pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
+pub fn ingress(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let header = wire::Packet::new_checked(data)?;
     if header.version() != 4 {
         return Err(Error::InvalidVersion);
@@ -252,14 +252,14 @@ pub fn input(_dev: &NetDevice, data: &[u8]) -> Result<()> {
 
     let payload = &data[hlen..total_len];
     match header.protocol() {
-        IpHeader::ICMP => icmp::input(src, dst, payload),
-        IpHeader::TCP => tcp::input(src, dst, payload),
-        IpHeader::UDP => udp::input(src, dst, payload),
+        IpHeader::ICMP => icmp::ingress(src, dst, payload),
+        IpHeader::TCP => tcp::ingress(src, dst, payload),
+        IpHeader::UDP => udp::ingress(src, dst, payload),
         _ => Err(Error::UnsupportedProtocol),
     }
 }
 
-pub fn output(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+pub fn egress(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     let total_len = size_of::<IpHeader>() + data.len();
     if total_len > 65535 {
         return Err(Error::PacketTooLarge);
@@ -312,10 +312,10 @@ pub fn get_source_address(dst: IpAddr) -> Option<IpAddr> {
     dev.interfaces.first().map(|i| i.addr)
 }
 
-pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
+pub fn egress_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
     if dst.0 == IpAddr::LOOPBACK.0 {
         let dev = crate::net::device::net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-        return output(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
+        return egress(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
     }
 
     if let Some(route) = crate::net::route::lookup(dst) {
@@ -343,7 +343,7 @@ pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
             hdr.fill_checksum();
         }
         ip_packet[core::mem::size_of::<super::ip::IpHeader>()..].copy_from_slice(payload);
-        return crate::net::ethernet::output(
+        return crate::net::ethernet::egress(
             &mut dev_clone,
             mac,
             crate::net::ethernet::ETHERTYPE_IPV4,
@@ -356,7 +356,7 @@ pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
 
 pub fn ip_init() {
     crate::println!("[net] IP layer init");
-    net_protocol_register(ProtocolType::IP, input);
+    net_protocol_register(ProtocolType::IP, ingress);
 }
 
 pub fn parse_ip_str(s: &str) -> Result<IpAddr> {
@@ -373,7 +373,7 @@ pub fn parse_ip_str(s: &str) -> Result<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{input, wire, IpHeader};
+    use super::{ingress, wire, IpHeader};
     use crate::error::Error;
     use crate::net::device::{
         NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps, NetDeviceType,
@@ -403,7 +403,7 @@ mod tests {
         let dev = dummy_dev();
         let mut data = [0u8; wire::MIN_HEADER_LEN];
         data[0] = 0x55; // version=5, ihl=5
-        let err = input(&dev, &data).unwrap_err();
+        let err = ingress(&dev, &data).unwrap_err();
         assert_eq!(err, Error::InvalidVersion);
     }
 
@@ -412,7 +412,7 @@ mod tests {
         let dev = dummy_dev();
         let mut data = [0u8; wire::MIN_HEADER_LEN];
         data[0] = 0x44; // version=4, ihl=4 -> 16 bytes
-        let err = input(&dev, &data).unwrap_err();
+        let err = ingress(&dev, &data).unwrap_err();
         assert_eq!(err, Error::InvalidHeaderLen);
     }
 
@@ -427,7 +427,7 @@ mod tests {
         let csum = checksum(&data);
         data[10..12].copy_from_slice(&csum.to_be_bytes());
 
-        let err = input(&dev, &data).unwrap_err();
+        let err = ingress(&dev, &data).unwrap_err();
         assert_eq!(err, Error::PacketTruncated);
     }
 
@@ -442,7 +442,7 @@ mod tests {
         let csum = checksum(&data);
         data[10..12].copy_from_slice(&csum.to_be_bytes());
 
-        let err = input(&dev, &data).unwrap_err();
+        let err = ingress(&dev, &data).unwrap_err();
         assert_eq!(err, Error::InvalidLength);
     }
 }

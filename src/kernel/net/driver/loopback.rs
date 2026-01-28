@@ -15,7 +15,7 @@ const LOOPBACK_MTU: u16 = u16::MAX;
 
 fn loopback_transmit(dev: &mut NetDevice, data: &[u8]) -> Result<()> {
     crate::trace!(DRIVER, "[loopback] transmit {} bytes", data.len());
-    protocol::net_input_handler(dev, data)
+    protocol::net_ingress_handler(dev, data)
 }
 
 fn loopback_open(dev: &mut NetDevice) -> Result<()> {

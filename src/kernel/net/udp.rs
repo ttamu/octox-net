@@ -1,5 +1,5 @@
 use super::{
-    ip::{output_route, IpAddr, IpEndpoint, IpHeader},
+    ip::{egress_route, IpAddr, IpEndpoint, IpHeader},
     util::checksum,
 };
 use crate::net::{device::net_device_by_name, route};
@@ -198,7 +198,7 @@ impl Udp {
         Ok(())
     }
 
-    fn input(&self, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+    fn ingress(&self, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
         let header = wire::Packet::new_checked(data)?;
         let src_port = header.src_port();
         let dst_port = header.dst_port();
@@ -252,7 +252,7 @@ impl Udp {
         let src = socket.local;
         drop(sockets);
 
-        output(src, dst, data)
+        egress(src, dst, data)
     }
 
     fn socket_recvfrom(&self, index: usize, buf: &mut [u8]) -> Result<(usize, IpEndpoint)> {
@@ -314,11 +314,11 @@ fn select_src_addr(dst: IpAddr) -> Result<IpAddr> {
     Err(Error::NoSuchNode)
 }
 
-pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
-    UDP.input(src, dst, data)
+pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+    UDP.ingress(src, dst, data)
 }
 
-pub fn output(src: IpEndpoint, dst: IpEndpoint, data: &[u8]) -> Result<()> {
+pub fn egress(src: IpEndpoint, dst: IpEndpoint, data: &[u8]) -> Result<()> {
     let total_len = wire::HEADER_LEN + data.len();
     if total_len > 65535 {
         return Err(Error::PacketTooLarge);
@@ -355,7 +355,7 @@ pub fn output(src: IpEndpoint, dst: IpEndpoint, data: &[u8]) -> Result<()> {
         total_len
     );
 
-    output_route(dst.addr, UDP_PROTOCOL, &packet)
+    egress_route(dst.addr, UDP_PROTOCOL, &packet)
 }
 
 pub fn socket_sendto(index: usize, dst: IpEndpoint, data: &[u8]) -> Result<()> {

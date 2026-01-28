@@ -1,5 +1,5 @@
 use super::{
-    ip::{output, IpAddr, IpHeader},
+    ip::{egress, IpAddr, IpHeader},
     util::{checksum, verify_checksum, write_u16},
 };
 use crate::{
@@ -139,7 +139,7 @@ static ICMP_REPLY_CV: Condvar = Condvar::new();
 
 use super::ip;
 
-pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
+pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     if !verify_checksum(data) {
         return Err(Error::ChecksumError);
     }
@@ -235,7 +235,7 @@ pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -
     );
 
     let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-    output(&dev, IpHeader::ICMP, src, dst, &packet)
+    egress(&dev, IpHeader::ICMP, src, dst, &packet)
 }
 
 pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
@@ -261,7 +261,7 @@ pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()
         seq
     );
 
-    ip::output_route(dst, IpHeader::ICMP, &packet)
+    ip::egress_route(dst, IpHeader::ICMP, &packet)
 }
 
 pub fn notify_reply(

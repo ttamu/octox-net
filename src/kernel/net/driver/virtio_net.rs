@@ -427,7 +427,7 @@ pub fn poll_rx() {
         drop(guard);
         for p in pkts {
             let dev = crate::net::device::net_device_by_name("eth0").unwrap();
-            let _ = ethernet::input(&dev, p.as_slice());
+            let _ = ethernet::ingress(&dev, p.as_slice());
         }
     }
 }

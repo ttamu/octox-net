@@ -40,10 +40,10 @@ pub fn net_protocol_handler(dev: &NetDevice, ptype: ProtocolType, data: &[u8]) -
     }
 }
 
-pub fn net_input_handler(dev: &NetDevice, data: &[u8]) -> Result<()> {
+pub fn net_ingress_handler(dev: &NetDevice, data: &[u8]) -> Result<()> {
     crate::trace!(
         DRIVER,
-        "[net] input {} bytes from {}",
+        "[net] ingress {} bytes from {}",
         data.len(),
         dev.name()
     );
