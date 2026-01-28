@@ -247,3 +247,53 @@ where
 {
     NET_DEVICES.foreach(f)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::ethernet::MacAddr;
+    use crate::net::interface::NetInterface;
+    use crate::net::ip::IpAddr;
+
+    fn ok_transmit(_dev: &mut NetDevice, _data: &[u8]) -> Result<()> {
+        Ok(())
+    }
+    fn ok_open(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+    fn ok_close(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+
+    fn dummy_device(name: &str) -> NetDevice {
+        NetDevice::new(NetDeviceConfig {
+            name,
+            dev_type: NetDeviceType::Ethernet,
+            mtu: 1500,
+            flags: NetDeviceFlags::UP,
+            header_len: 14,
+            addr_len: 6,
+            hw_addr: MacAddr::ZERO,
+            ops: NetDeviceOps {
+                transmit: ok_transmit,
+                open: ok_open,
+                close: ok_close,
+            },
+        })
+    }
+
+    #[test_case]
+    fn name_truncated_to_15_bytes() {
+        let dev = dummy_device("0123456789abcdef");
+        assert_eq!(dev.name(), "0123456789abcde");
+    }
+
+    #[test_case]
+    fn interface_by_addr_matches() {
+        let mut dev = dummy_device("if0");
+        let iface = NetInterface::new(IpAddr::new(192, 168, 1, 10), IpAddr::new(255, 255, 255, 0));
+        dev.add_interface(iface.clone());
+        let found = dev.interface_by_addr(iface.addr.0).unwrap();
+        assert_eq!(found.addr, iface.addr);
+    }
+}

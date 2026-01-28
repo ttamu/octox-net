@@ -28,3 +28,15 @@ pub fn net_interface_setup(dev_name: &str, addr: IpAddr, netmask: IpAddr) -> Res
         dev.add_interface(iface);
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test_case]
+    fn new_sets_broadcast_and_family() {
+        let iface = NetInterface::new(IpAddr::new(192, 168, 1, 10), IpAddr::new(255, 255, 255, 0));
+        assert_eq!(iface.broadcast, IpAddr::new(192, 168, 1, 255));
+        assert_eq!(iface.family, 2);
+    }
+}

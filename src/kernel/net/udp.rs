@@ -349,6 +349,7 @@ pub fn socket_recvfrom(index: usize, buf: &mut [u8]) -> Result<(usize, IpEndpoin
 mod tests {
     use super::{wire, IpEndpoint, Udp};
     use crate::error::Error;
+    use crate::net::socket::SocketHandle;
 
     #[test_case]
     fn packet_too_short() {
@@ -383,5 +384,22 @@ mod tests {
         let mut buf = [0u8; 4];
         let err = udp.socket_recvfrom(idx, &mut buf).unwrap_err();
         assert_eq!(err, Error::WouldBlock);
+    }
+
+    #[test_case]
+    fn bind_ephemeral_ports_unique() {
+        let udp = Udp::new();
+        let a = udp.socket_alloc().unwrap();
+        let b = udp.socket_alloc().unwrap();
+        udp.socket_bind(a, IpEndpoint::any(0)).unwrap();
+        udp.socket_bind(b, IpEndpoint::any(0)).unwrap();
+
+        let sockets = udp.sockets.lock();
+        let a_port = sockets.get(SocketHandle::new(a)).unwrap().local.port;
+        let b_port = sockets.get(SocketHandle::new(b)).unwrap().local.port;
+
+        assert_ne!(a_port, 0);
+        assert_ne!(b_port, 0);
+        assert_ne!(a_port, b_port);
     }
 }

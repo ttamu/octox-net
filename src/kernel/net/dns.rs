@@ -336,7 +336,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_dns_response, wire};
+    use super::{encode_domain_name, parse_dns_response, wire, IpAddr};
     use crate::error::Error;
     use alloc::vec;
 
@@ -357,5 +357,44 @@ mod tests {
         }
         let err = parse_dns_response(&data).unwrap_err();
         assert_eq!(err, Error::PacketTooShort);
+    }
+
+    #[test_case]
+    fn ancount_zero_returns_not_found() {
+        let mut data = vec![0u8; wire::HEADER_LEN];
+        {
+            let mut header = wire::HeaderMut::new_unchecked(&mut data);
+            header.set_ancount(0);
+        }
+        let err = parse_dns_response(&data).unwrap_err();
+        assert_eq!(err, Error::NotFound);
+    }
+
+    #[test_case]
+    fn parse_a_record_response() {
+        let mut data = vec![0u8; wire::HEADER_LEN];
+        {
+            let mut header = wire::HeaderMut::new_unchecked(&mut data);
+            header.set_id(0x1234);
+            header.set_flags(0x8180);
+            header.set_qdcount(1);
+            header.set_ancount(1);
+            header.set_nscount(0);
+            header.set_arcount(0);
+        }
+
+        encode_domain_name("example.com", &mut data);
+        data.extend_from_slice(&1u16.to_be_bytes());
+        data.extend_from_slice(&1u16.to_be_bytes());
+
+        data.extend_from_slice(&[0xC0, 0x0C]);
+        data.extend_from_slice(&1u16.to_be_bytes());
+        data.extend_from_slice(&1u16.to_be_bytes());
+        data.extend_from_slice(&60u32.to_be_bytes());
+        data.extend_from_slice(&4u16.to_be_bytes());
+        data.extend_from_slice(&[1, 2, 3, 4]);
+
+        let addr = parse_dns_response(&data).unwrap();
+        assert_eq!(addr, IpAddr::new(1, 2, 3, 4));
     }
 }

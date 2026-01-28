@@ -370,13 +370,14 @@ pub fn parse_ip_str(s: &str) -> Result<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ingress, wire, IpHeader};
+    use super::{egress, ingress, parse_ip_str, wire, IpAddr, IpHeader};
     use crate::error::Error;
     use crate::net::device::{
         NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps, NetDeviceType,
     };
     use crate::net::ethernet::MacAddr;
     use crate::net::util::checksum;
+    use alloc::vec;
 
     fn dummy_dev() -> NetDevice {
         NetDevice::new(NetDeviceConfig {
@@ -441,5 +442,50 @@ mod tests {
 
         let err = ingress(&dev, &data).unwrap_err();
         assert_eq!(err, Error::InvalidLength);
+    }
+
+    #[test_case]
+    fn checksum_error() {
+        let dev = dummy_dev();
+        let mut data = [0u8; wire::MIN_HEADER_LEN];
+        {
+            let mut hdr = wire::PacketMut::new_unchecked(&mut data);
+            hdr.set_version_ihl(4, 5);
+            hdr.set_total_len(wire::MIN_HEADER_LEN as u16);
+            hdr.set_protocol(IpHeader::UDP);
+            hdr.set_src(IpAddr::new(10, 0, 0, 1).0);
+            hdr.set_dst(IpAddr::new(10, 0, 0, 2).0);
+            hdr.fill_checksum();
+        }
+        data[1] ^= 0xFF;
+        let err = ingress(&dev, &data).unwrap_err();
+        assert_eq!(err, Error::ChecksumError);
+    }
+
+    #[test_case]
+    fn parse_ip_str_valid() {
+        let ip = parse_ip_str("192.168.1.10").unwrap();
+        assert_eq!(ip, IpAddr::new(192, 168, 1, 10));
+    }
+
+    #[test_case]
+    fn parse_ip_str_invalid() {
+        let err = parse_ip_str("256.1.2.3").unwrap_err();
+        assert_eq!(err, Error::InvalidAddress);
+    }
+
+    #[test_case]
+    fn egress_packet_too_large() {
+        let dev = dummy_dev();
+        let payload = vec![0u8; 65516];
+        let err = egress(
+            &dev,
+            IpHeader::UDP,
+            IpAddr::new(10, 0, 0, 1),
+            IpAddr::new(10, 0, 0, 2),
+            &payload,
+        )
+        .unwrap_err();
+        assert_eq!(err, Error::PacketTooLarge);
     }
 }

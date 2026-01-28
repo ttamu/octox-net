@@ -169,12 +169,53 @@ pub fn egress(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
 #[cfg(test)]
 mod tests {
     use super::wire;
-    use crate::error::Error;
+    use crate::error::{Error, Result};
+    use crate::net::device::{
+        NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps, NetDeviceType,
+    };
+    use crate::net::ethernet::{ingress, MacAddr};
 
     #[test_case]
     fn frame_too_short() {
         let data = [0u8; wire::HEADER_LEN - 1];
         let err = wire::Frame::new_checked(&data).err().unwrap();
         assert_eq!(err, Error::PacketTooShort);
+    }
+
+    fn ok_transmit(_dev: &mut NetDevice, _data: &[u8]) -> Result<()> {
+        Ok(())
+    }
+    fn ok_open(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+    fn ok_close(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+
+    fn dummy_dev() -> NetDevice {
+        NetDevice::new(NetDeviceConfig {
+            name: "dummy",
+            dev_type: NetDeviceType::Ethernet,
+            mtu: 1500,
+            flags: NetDeviceFlags::UP,
+            header_len: wire::HEADER_LEN as u16,
+            addr_len: 6,
+            hw_addr: MacAddr::ZERO,
+            ops: NetDeviceOps {
+                transmit: ok_transmit,
+                open: ok_open,
+                close: ok_close,
+            },
+        })
+    }
+
+    #[test_case]
+    fn ingress_unsupported_ethertype() {
+        let dev = dummy_dev();
+        let mut frame = [0u8; wire::HEADER_LEN];
+        frame[12] = 0x12;
+        frame[13] = 0x34;
+        let err = ingress(&dev, &frame).unwrap_err();
+        assert_eq!(err, Error::UnsupportedProtocol);
     }
 }

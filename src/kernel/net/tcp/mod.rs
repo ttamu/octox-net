@@ -20,6 +20,7 @@ mod tests {
 
     mod wire_tests {
         use super::*;
+        use crate::error::Error;
 
         #[test_case]
         fn test_packet_parse_valid() {
@@ -73,6 +74,17 @@ mod tests {
             assert_eq!(packet_read.dst_port(), 1234);
             assert_eq!(packet_read.seq_number(), 1000);
             assert_eq!(packet_read.ack_number(), 2000);
+        }
+
+        #[test_case]
+        fn test_packet_invalid_header_len() {
+            let mut data = [0u8; 20];
+            data[12] = 4u8 << 4; // header len = 16 bytes
+            let result = wire::Packet::new_checked(&data);
+            match result {
+                Err(err) => assert_eq!(err, Error::InvalidHeaderLen),
+                Ok(_) => panic!("expected InvalidHeaderLen"),
+            }
         }
 
         #[test_case]
@@ -132,6 +144,51 @@ mod tests {
             assert!(socket.accept_ready);
             assert_eq!(socket.snd_una, 15);
             assert_eq!(socket.snd_wnd, 4096);
+        }
+
+        #[test_case]
+        fn synsent_invalid_ack_sends_rst() {
+            let mut socket = Socket::new(1, 1);
+            socket.state = State::SynSent;
+            socket.iss = 100;
+            socket.snd_una = 100;
+            socket.snd_nxt = 101;
+            socket.rcv_wnd = 1024;
+
+            let seg = SegmentInfo::new(1, 100, 0, 0, wire::field::FLG_ACK, &[]);
+            let mut proc = SegmentProcessor::new(&mut socket, seg);
+            proc.run();
+
+            assert_eq!(socket.state, State::SynSent);
+            let req = socket.pending.pop_front().unwrap();
+            assert_eq!(req.flags, wire::field::FLG_RST);
+            assert_eq!(req.seq, 100);
+        }
+
+        #[test_case]
+        fn payload_in_order_advances_rcv_nxt() {
+            let mut socket = Socket::new(8, 8);
+            socket.state = State::Established;
+            socket.rcv_nxt = 100;
+            socket.rcv_wnd = 8;
+            socket.snd_una = 1;
+            socket.snd_nxt = 2;
+
+            let payload = [0x01u8, 0x02, 0x03];
+            let seg = SegmentInfo::new(
+                100,
+                2,
+                payload.len() as u32,
+                1024,
+                wire::field::FLG_ACK,
+                &payload,
+            );
+            let mut proc = SegmentProcessor::new(&mut socket, seg);
+            proc.run();
+
+            assert_eq!(socket.rx_buf.len(), 3);
+            assert_eq!(socket.rcv_nxt, 103);
+            assert_eq!(socket.pending.len(), 1);
         }
     }
 }

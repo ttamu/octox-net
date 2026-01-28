@@ -336,12 +336,51 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::wire;
-    use crate::error::Error;
+    use crate::error::{Error, Result};
+    use crate::net::device::{
+        NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps, NetDeviceType,
+    };
+    use crate::net::ethernet::MacAddr;
 
     #[test_case]
     fn packet_too_short() {
         let data = [0u8; wire::PACKET_LEN - 1];
         let err = wire::Packet::new_checked(&data).err().unwrap();
         assert_eq!(err, Error::PacketTooShort);
+    }
+
+    fn ok_transmit(_dev: &mut NetDevice, _data: &[u8]) -> Result<()> {
+        Ok(())
+    }
+    fn ok_open(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+    fn ok_close(_dev: &mut NetDevice) -> Result<()> {
+        Ok(())
+    }
+
+    fn dummy_dev() -> NetDevice {
+        NetDevice::new(NetDeviceConfig {
+            name: "dummy",
+            dev_type: NetDeviceType::Ethernet,
+            mtu: 1500,
+            flags: NetDeviceFlags::UP,
+            header_len: 14,
+            addr_len: 6,
+            hw_addr: MacAddr::ZERO,
+            ops: NetDeviceOps {
+                transmit: ok_transmit,
+                open: ok_open,
+                close: ok_close,
+            },
+        })
+    }
+
+    #[test_case]
+    fn ingress_rejects_unsupported_protocol() {
+        let dev = dummy_dev();
+        let data = [0u8; wire::PACKET_LEN];
+        let err = super::ingress(&dev, &data).unwrap_err();
+        assert_eq!(err, Error::UnsupportedProtocol);
     }
 }
