@@ -5,53 +5,75 @@ use alloc::string::String;
 use ulib::io::{Read, Write};
 use ulib::stdio::{stdin, stdout};
 use ulib::{accept, close, connect, env, listen, print, println, recv, send, socket, sys};
+use args::{Error, Mode};
 
 const COLOR_RESET: &str = "\x1b[0m";
 const COLOR_RED: &str = "\x1b[31m";
 const COLOR_GREEN: &str = "\x1b[32m";
 const COLOR_CYAN: &str = "\x1b[36m";
+const IO_BUF_SIZE: usize = 1024;
 
-struct Config {
-    listen_mode: bool,
-    addr: String,
-    port: u16,
-}
-impl Config {
-    fn parse() -> Result<Self, String> {
+mod args {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use ulib::env;
+
+    pub enum Mode {
+        Listen { port: u16 },
+        Connect { addr: String, port: u16 },
+    }
+
+    pub enum Error {
+        Usage,
+        UnknownArg(&'static str),
+        InvalidPort(&'static str),
+    }
+
+    pub fn parse() -> Result<Mode, Error> {
         let mut args = env::args();
         let _prog = args.next();
 
         let mut listen_mode = false;
-        let mut addr = String::from("0.0.0.0");
-        let mut port: u16 = 0;
+        let mut positional: Vec<&'static str> = Vec::new();
 
-        while let Some(arg) = args.next() {
-            if arg.starts_with('-') {
-                if arg.contains('l') {
-                    listen_mode = true;
-                }
-            } else if let Ok(p) = arg.parse::<u16>() {
-                port = p;
-            } else if arg.contains('.') {
-                addr = String::from(arg);
+        for arg in args {
+            if arg == "-l" {
+                listen_mode = true;
+                continue;
             }
+            if arg.starts_with('-') {
+                return Err(Error::UnknownArg(arg));
+            }
+            positional.push(arg);
         }
 
-        if port == 0 {
-            return Err("invalid arguments".into());
+        if listen_mode {
+            if positional.len() != 1 {
+                return Err(Error::Usage);
+            }
+            let port = parse_port(positional[0])?;
+            return Ok(Mode::Listen { port });
         }
 
-        Ok(Config {
-            listen_mode,
-            addr,
-            port,
-        })
+        if positional.len() != 2 {
+            return Err(Error::Usage);
+        }
+
+        let addr = String::from(positional[0]);
+        let port = parse_port(positional[1])?;
+
+        Ok(Mode::Connect { addr, port })
+    }
+
+    fn parse_port(arg: &'static str) -> Result<u16, Error> {
+        arg.parse::<u16>().map_err(|_| Error::InvalidPort(arg))
     }
 }
 
 struct Connection {
     sock: usize,
 }
+
 impl Connection {
     const CHILD_PROCESS: usize = 0;
 
@@ -101,7 +123,7 @@ impl Connection {
     }
 
     fn receive_loop(&self) {
-        let mut buf = [0u8; 1024];
+        let mut buf = [0u8; IO_BUF_SIZE];
         loop {
             match recv(self.sock, &mut buf) {
                 Ok(0) => {
@@ -123,7 +145,7 @@ impl Connection {
     }
 
     fn send_loop(&self, child_pid: usize) {
-        let mut buf = [0u8; 1024];
+        let mut buf = [0u8; IO_BUF_SIZE];
         let mut input = stdin();
 
         loop {
@@ -145,21 +167,34 @@ impl Connection {
     }
 }
 
+fn print_usage() {
+    println!("usage: nc -l <port>");
+    println!("       nc <host> <port>");
+}
+
 fn main() {
-    let config = match Config::parse() {
-        Ok(c) => c,
-        Err(e) => {
-            println!("{}error: {}{}", COLOR_RED, e, COLOR_RESET);
-            println!("usage: nc -l <port>");
-            println!("       nc <host> <port>");
+    let mode = match args::parse() {
+        Ok(mode) => mode,
+        Err(Error::Usage) => {
+            println!("{}error: invalid arguments{}", COLOR_RED, COLOR_RESET);
+            print_usage();
+            return;
+        }
+        Err(Error::UnknownArg(arg)) => {
+            println!("{}error: unknown option: {}{}", COLOR_RED, arg, COLOR_RESET);
+            print_usage();
+            return;
+        }
+        Err(Error::InvalidPort(arg)) => {
+            println!("{}error: invalid port: {}{}", COLOR_RED, arg, COLOR_RESET);
+            print_usage();
             return;
         }
     };
 
-    let conn = if config.listen_mode {
-        Connection::listen(config.port)
-    } else {
-        Connection::connect(config.addr, config.port)
+    let conn = match mode {
+        Mode::Listen { port } => Connection::listen(port),
+        Mode::Connect { addr, port } => Connection::connect(addr, port),
     };
 
     match conn {
