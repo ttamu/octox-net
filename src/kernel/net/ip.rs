@@ -5,7 +5,9 @@ use super::{
 use crate::{
     error::{Error, Result},
     net::{
-        arp, device::{net_device_by_name, NetDevice}, ethernet, icmp, route, tcp, udp,
+        arp,
+        device::{net_device_by_name, NetDevice},
+        ethernet, icmp, route, tcp, udp,
     },
     println, trace,
 };
@@ -343,12 +345,7 @@ pub fn egress_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
             hdr.fill_checksum();
         }
         ip_packet[core::mem::size_of::<super::ip::IpHeader>()..].copy_from_slice(payload);
-        return ethernet::egress(
-            &mut dev_clone,
-            mac,
-            ethernet::ETHERTYPE_IPV4,
-            &ip_packet,
-        );
+        return ethernet::egress(&mut dev_clone, mac, ethernet::ETHERTYPE_IPV4, &ip_packet);
     }
 
     Err(Error::NoSuchNode)

@@ -14,8 +14,8 @@ pub mod trace;
 pub mod udp;
 pub mod util;
 
-use core::sync::atomic::{AtomicBool, Ordering};
 use crate::println;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 static NET_POLL_PENDING: AtomicBool = AtomicBool::new(false);
 static NET_POLL_RUNNING: AtomicBool = AtomicBool::new(false);

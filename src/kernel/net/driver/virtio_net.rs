@@ -13,8 +13,9 @@ use crate::{
         ip::IpAddr,
         request_poll,
     },
+    println,
     spinlock::Mutex,
-    println, trace,
+    trace,
 };
 use alloc::vec::Vec;
 use core::sync::atomic::{fence, Ordering};

@@ -2,7 +2,11 @@ use super::{
     ip::{IpAddr, IpEndpoint},
     udp,
 };
-use crate::{error::{Error, Result}, net::poll, trace};
+use crate::{
+    error::{Error, Result},
+    net::poll,
+    trace,
+};
 extern crate alloc;
 use alloc::{vec, vec::Vec};
 

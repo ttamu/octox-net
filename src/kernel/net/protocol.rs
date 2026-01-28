@@ -1,8 +1,9 @@
 use crate::{
     error::{Error, Result},
     net::{device::NetDevice, device::NetDeviceFlags},
+    println,
     spinlock::Mutex,
-    println, trace,
+    trace,
 };
 use alloc::vec::Vec;
 
