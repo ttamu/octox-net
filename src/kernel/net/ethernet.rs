@@ -2,7 +2,6 @@ extern crate alloc;
 use crate::error::{Error, Result};
 use crate::net::device::{NetDevice, NetDeviceFlags};
 use crate::net::protocol::{net_protocol_handler, ProtocolType};
-use crate::net::util::{ntoh16, parse_header, parse_header_mut};
 use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,6 +30,82 @@ impl fmt::Display for MacAddr {
     }
 }
 
+mod wire {
+    use crate::error::{Error, Result};
+    use crate::net::util::{read_u16, write_u16};
+
+    pub mod field {
+        pub type Field = core::ops::Range<usize>;
+
+        pub const DST: Field = 0..6;
+        pub const SRC: Field = 6..12;
+        pub const ETHERTYPE: Field = 12..14;
+    }
+
+    pub const HEADER_LEN: usize = field::ETHERTYPE.end;
+
+    pub struct Frame<'a> {
+        buffer: &'a [u8],
+    }
+
+    impl<'a> Frame<'a> {
+        pub fn new_checked(buffer: &'a [u8]) -> Result<Self> {
+            if buffer.len() < HEADER_LEN {
+                return Err(Error::PacketTooShort);
+            }
+            Ok(Self { buffer })
+        }
+
+        #[allow(dead_code)]
+        pub fn dst(&self) -> [u8; 6] {
+            let mut dst = [0u8; 6];
+            dst.copy_from_slice(&self.buffer[field::DST]);
+            dst
+        }
+
+        #[allow(dead_code)]
+        pub fn src(&self) -> [u8; 6] {
+            let mut src = [0u8; 6];
+            src.copy_from_slice(&self.buffer[field::SRC]);
+            src
+        }
+
+        pub fn ethertype(&self) -> u16 {
+            read_u16(&self.buffer[field::ETHERTYPE])
+        }
+
+        pub fn payload(&self) -> &'a [u8] {
+            &self.buffer[HEADER_LEN..]
+        }
+    }
+
+    pub struct FrameMut<'a> {
+        buffer: &'a mut [u8],
+    }
+
+    impl<'a> FrameMut<'a> {
+        pub fn new_unchecked(buffer: &'a mut [u8]) -> Self {
+            Self { buffer }
+        }
+
+        pub fn set_dst(&mut self, mac: [u8; 6]) {
+            self.buffer[field::DST].copy_from_slice(&mac);
+        }
+
+        pub fn set_src(&mut self, mac: [u8; 6]) {
+            self.buffer[field::SRC].copy_from_slice(&mac);
+        }
+
+        pub fn set_ethertype(&mut self, value: u16) {
+            write_u16(&mut self.buffer[field::ETHERTYPE], value);
+        }
+
+        pub fn payload_mut(&mut self) -> &mut [u8] {
+            &mut self.buffer[HEADER_LEN..]
+        }
+    }
+}
+
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct EthHeader {
@@ -40,15 +115,15 @@ pub struct EthHeader {
 }
 
 impl EthHeader {
-    pub const LEN: usize = core::mem::size_of::<EthHeader>();
+    pub const LEN: usize = wire::HEADER_LEN;
 }
 
 pub const ETHERTYPE_ARP: u16 = 0x0806;
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
 
 pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
-    let hdr = parse_header::<EthHeader>(data)?;
-    let etype = ntoh16(hdr.ethertype);
+    let frame = wire::Frame::new_checked(data)?;
+    let etype = frame.ethertype();
 
     crate::trace!(
         ETHER,
@@ -57,7 +132,7 @@ pub fn input(dev: &NetDevice, data: &[u8]) -> Result<()> {
         data.len()
     );
 
-    let payload = &data[EthHeader::LEN..];
+    let payload = frame.payload();
     match etype {
         ETHERTYPE_ARP => crate::net::arp::input(dev, payload),
         ETHERTYPE_IPV4 => net_protocol_handler(dev, ProtocolType::IP, payload),
@@ -72,14 +147,14 @@ pub fn output(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
     if !dev.flags().contains(NetDeviceFlags::UP) {
         return Err(Error::NotConnected);
     }
-    let mut frame = alloc::vec![0u8; EthHeader::LEN + payload.len()];
+    let mut frame = alloc::vec![0u8; wire::HEADER_LEN + payload.len()];
     {
-        let hdr = parse_header_mut::<EthHeader>(&mut frame)?;
-        hdr.dst = dst_mac.0;
-        hdr.src = dev.hw_addr.0;
-        hdr.ethertype = ethertype.to_be();
+        let mut hdr = wire::FrameMut::new_unchecked(&mut frame);
+        hdr.set_dst(dst_mac.0);
+        hdr.set_src(dev.hw_addr.0);
+        hdr.set_ethertype(ethertype);
+        hdr.payload_mut().copy_from_slice(payload);
     }
-    frame[EthHeader::LEN..].copy_from_slice(payload);
     crate::trace!(
         ETHER,
         "[ether] output: dst={:02x?} type=0x{:04x} len={}",
@@ -88,4 +163,17 @@ pub fn output(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
         frame.len()
     );
     dev.transmit(&frame)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wire;
+    use crate::error::Error;
+
+    #[test_case]
+    fn frame_too_short() {
+        let data = [0u8; wire::HEADER_LEN - 1];
+        let err = wire::Frame::new_checked(&data).err().unwrap();
+        assert_eq!(err, Error::PacketTooShort);
+    }
 }

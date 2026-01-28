@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::net::ip::{self, IpAddr};
+use crate::net::ip::{self, IpAddr, IpEndpoint};
 use crate::net::socket::{SocketHandle, SocketSet};
 use crate::spinlock::Mutex;
 use alloc::{collections::VecDeque, vec::Vec};
@@ -218,29 +218,6 @@ impl fmt::Display for State {
             State::CloseWait => write!(f, "CLOSE-WAIT"),
             State::LastAck => write!(f, "LAST-ACK"),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct IpEndpoint {
-    pub addr: IpAddr,
-    pub port: u16,
-}
-
-impl IpEndpoint {
-    pub const fn new(addr: IpAddr, port: u16) -> Self {
-        Self { addr, port }
-    }
-
-    pub const fn unspecified() -> Self {
-        Self {
-            addr: IpAddr(0),
-            port: 0,
-        }
-    }
-
-    pub fn is_unspecified(&self) -> bool {
-        self.addr.0 == 0 && self.port == 0
     }
 }
 

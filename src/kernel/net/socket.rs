@@ -43,14 +43,14 @@ impl<T> SocketSet<T> {
             }
         }
 
-        Err(Error::NoPcbAvailable)
+        Err(Error::NoSocketAvailable)
     }
 
     pub fn free(&mut self, handle: SocketHandle) -> Result<()> {
         self.ensure_capacity();
 
         if handle.index() >= self.capacity {
-            return Err(Error::InvalidPcbIndex);
+            return Err(Error::InvalidSocketIndex);
         }
 
         self.sockets[handle.index()] = None;
@@ -59,22 +59,22 @@ impl<T> SocketSet<T> {
 
     pub fn get(&self, handle: SocketHandle) -> Result<&T> {
         if handle.index() >= self.sockets.len() {
-            return Err(Error::InvalidPcbIndex);
+            return Err(Error::InvalidSocketIndex);
         }
 
         self.sockets[handle.index()]
             .as_ref()
-            .ok_or(Error::InvalidPcbState)
+            .ok_or(Error::InvalidSocketState)
     }
 
     pub fn get_mut(&mut self, handle: SocketHandle) -> Result<&mut T> {
         if handle.index() >= self.sockets.len() {
-            return Err(Error::InvalidPcbIndex);
+            return Err(Error::InvalidSocketIndex);
         }
 
         self.sockets[handle.index()]
             .as_mut()
-            .ok_or(Error::InvalidPcbState)
+            .ok_or(Error::InvalidSocketState)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (SocketHandle, &T)> {

@@ -789,8 +789,8 @@ impl SysCalls {
         return Ok(());
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
-            use crate::net::ip::{parse_ip_str, IpAddr};
-            use crate::net::tcp::{IpEndpoint, State};
+            use crate::net::ip::{parse_ip_str, IpAddr, IpEndpoint};
+            use crate::net::tcp::State;
 
             let sock = argraw(0);
             let mut sbinfo: SBInfo = Default::default();
@@ -837,8 +837,7 @@ impl SysCalls {
         return Ok(());
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
-            use crate::net::ip::IpAddr;
-            use crate::net::tcp::IpEndpoint;
+            use crate::net::ip::{IpAddr, IpEndpoint};
 
             let sock = argraw(0);
             let port = argraw(1) as u16;

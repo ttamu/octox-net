@@ -1,6 +1,6 @@
 use super::{
     ip::{output, IpAddr, IpHeader},
-    util::{checksum, parse_header, parse_header_mut, verify_checksum},
+    util::{checksum, verify_checksum, write_u16},
 };
 use crate::{
     condvar::Condvar,
@@ -18,6 +18,91 @@ pub enum IcmpType {
     DestinationUnreachable = 3,
     EchoRequest = 8,
     TimeExceeded = 11,
+}
+
+mod wire {
+    use crate::error::{Error, Result};
+    use crate::net::util::{read_u16, write_u16};
+
+    pub mod field {
+        pub type Field = core::ops::Range<usize>;
+
+        pub const MSG_TYPE: Field = 0..1;
+        pub const CODE: Field = 1..2;
+        pub const CHECKSUM: Field = 2..4;
+        pub const ID: Field = 4..6;
+        pub const SEQ: Field = 6..8;
+    }
+
+    pub const ECHO_HEADER_LEN: usize = field::SEQ.end;
+
+    pub struct Echo<'a> {
+        buffer: &'a [u8],
+    }
+
+    impl<'a> Echo<'a> {
+        pub fn new_checked(buffer: &'a [u8]) -> Result<Self> {
+            if buffer.len() < ECHO_HEADER_LEN {
+                return Err(Error::PacketTooShort);
+            }
+            Ok(Self { buffer })
+        }
+
+        pub fn msg_type(&self) -> u8 {
+            self.buffer[field::MSG_TYPE.start]
+        }
+
+        pub fn code(&self) -> u8 {
+            self.buffer[field::CODE.start]
+        }
+
+        #[allow(dead_code)]
+        pub fn checksum(&self) -> u16 {
+            read_u16(&self.buffer[field::CHECKSUM])
+        }
+
+        pub fn id(&self) -> u16 {
+            read_u16(&self.buffer[field::ID])
+        }
+
+        pub fn seq(&self) -> u16 {
+            read_u16(&self.buffer[field::SEQ])
+        }
+    }
+
+    pub struct EchoMut<'a> {
+        buffer: &'a mut [u8],
+    }
+
+    impl<'a> EchoMut<'a> {
+        pub fn new_unchecked(buffer: &'a mut [u8]) -> Self {
+            Self { buffer }
+        }
+
+        pub fn set_msg_type(&mut self, value: u8) {
+            self.buffer[field::MSG_TYPE.start] = value;
+        }
+
+        pub fn set_code(&mut self, value: u8) {
+            self.buffer[field::CODE.start] = value;
+        }
+
+        pub fn set_checksum(&mut self, value: u16) {
+            write_u16(&mut self.buffer[field::CHECKSUM], value);
+        }
+
+        pub fn set_id(&mut self, value: u16) {
+            write_u16(&mut self.buffer[field::ID], value);
+        }
+
+        pub fn set_seq(&mut self, value: u16) {
+            write_u16(&mut self.buffer[field::SEQ], value);
+        }
+
+        pub fn payload_mut(&mut self) -> &mut [u8] {
+            &mut self.buffer[ECHO_HEADER_LEN..]
+        }
+    }
 }
 
 #[repr(C, packed)]
@@ -59,12 +144,12 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
         return Err(Error::ChecksumError);
     }
 
-    let echo = parse_header::<IcmpEcho>(data)?;
-    let id = u16::from_be(echo.id);
-    let seq = u16::from_be(echo.seq);
-    let payload = &data[IcmpEcho::HEADER_SIZE..];
+    let echo = wire::Echo::new_checked(data)?;
+    let id = echo.id();
+    let seq = echo.seq();
+    let payload = &data[wire::ECHO_HEADER_LEN..];
 
-    match echo.msg_type {
+    match echo.msg_type() {
         t if t == IcmpType::EchoRequest as u8 => {
             crate::trace!(
                 ICMP,
@@ -86,7 +171,7 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
             notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
         }
         t if t == IcmpType::DestinationUnreachable as u8 => {
-            let code = echo.code;
+            let code = echo.code();
 
             if payload.len() < 28 {
                 return Err(Error::PacketTooShort);
@@ -100,7 +185,7 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
             }
 
             let inner_icmp = &payload[20..];
-            if inner_icmp.len() < IcmpEcho::HEADER_SIZE {
+            if inner_icmp.len() < wire::ECHO_HEADER_LEN {
                 return Err(Error::UnsupportedProtocol);
             }
 
@@ -126,20 +211,20 @@ pub fn input(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
 }
 
 pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    let total_len = IcmpEcho::HEADER_SIZE + payload.len();
+    let total_len = wire::ECHO_HEADER_LEN + payload.len();
     let mut packet = vec![0u8; total_len];
 
     {
-        let echo = parse_header_mut::<IcmpEcho>(&mut packet)?;
-        echo.msg_type = IcmpType::EchoReply as u8;
-        echo.code = 0;
-        echo.checksum = 0;
-        echo.id = id.to_be();
-        echo.seq = seq.to_be();
+        let mut echo = wire::EchoMut::new_unchecked(&mut packet);
+        echo.set_msg_type(IcmpType::EchoReply as u8);
+        echo.set_code(0);
+        echo.set_checksum(0);
+        echo.set_id(id);
+        echo.set_seq(seq);
+        echo.payload_mut().copy_from_slice(payload);
     }
-    packet[IcmpEcho::HEADER_SIZE..].copy_from_slice(payload);
-    let csum = checksum(&packet).to_be();
-    packet[2..4].copy_from_slice(&csum.to_ne_bytes());
+    let csum = checksum(&packet);
+    write_u16(&mut packet[2..4], csum);
 
     crate::trace!(
         ICMP,
@@ -154,19 +239,19 @@ pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -
 }
 
 pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    let total_len = IcmpEcho::HEADER_SIZE + payload.len();
+    let total_len = wire::ECHO_HEADER_LEN + payload.len();
     let mut packet = vec![0u8; total_len];
     {
-        let echo = parse_header_mut::<IcmpEcho>(&mut packet)?;
-        echo.msg_type = IcmpType::EchoRequest as u8;
-        echo.code = 0;
-        echo.checksum = 0;
-        echo.id = id.to_be();
-        echo.seq = seq.to_be();
+        let mut echo = wire::EchoMut::new_unchecked(&mut packet);
+        echo.set_msg_type(IcmpType::EchoRequest as u8);
+        echo.set_code(0);
+        echo.set_checksum(0);
+        echo.set_id(id);
+        echo.set_seq(seq);
+        echo.payload_mut().copy_from_slice(payload);
     }
-    packet[IcmpEcho::HEADER_SIZE..].copy_from_slice(payload);
-    let csum = checksum(&packet).to_be();
-    packet[2..4].copy_from_slice(&csum.to_ne_bytes());
+    let csum = checksum(&packet);
+    write_u16(&mut packet[2..4], csum);
 
     crate::trace!(
         ICMP,
@@ -221,5 +306,18 @@ pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
             return Err(Error::Timeout);
         }
         crate::proc::yielding();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wire;
+    use crate::error::Error;
+
+    #[test_case]
+    fn echo_too_short() {
+        let data = [0u8; wire::ECHO_HEADER_LEN - 1];
+        let err = wire::Echo::new_checked(&data).err().unwrap();
+        assert_eq!(err, Error::PacketTooShort);
     }
 }

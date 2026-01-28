@@ -71,27 +71,9 @@ pub fn verify_checksum(data: &[u8]) -> bool {
     checksum(data) == 0
 }
 
-use crate::error::{Error, Result};
-use core::mem::size_of;
-
-pub fn parse_header<H: Sized>(data: &[u8]) -> Result<&H> {
-    if data.len() < size_of::<H>() {
-        return Err(Error::PacketTooShort);
-    }
-    Ok(unsafe { &*(data.as_ptr() as *const H) })
-}
-
-pub fn parse_header_mut<H: Sized>(data: &mut [u8]) -> Result<&mut H> {
-    if data.len() < size_of::<H>() {
-        return Err(Error::PacketTooShort);
-    }
-    Ok(unsafe { &mut *(data.as_mut_ptr() as *mut H) })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::Error;
 
     #[test_case]
     fn endian_roundtrip() {
@@ -114,12 +96,5 @@ mod tests {
             sum as u8,
         ];
         assert!(verify_checksum(&packet));
-    }
-
-    #[test_case]
-    fn parse_header_too_short() {
-        let data = [0u8; 2];
-        let err = parse_header::<u32>(&data).unwrap_err();
-        assert_eq!(err, Error::PacketTooShort);
     }
 }
