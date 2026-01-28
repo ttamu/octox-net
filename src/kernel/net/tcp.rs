@@ -464,241 +464,9 @@ impl Socket {
         flags: u8,
         payload: &[u8],
     ) {
-        fn seq_lt(a: u32, b: u32) -> bool {
-            (a.wrapping_sub(b) as i32) < 0
-        }
-
-        fn seq_le(a: u32, b: u32) -> bool {
-            (a.wrapping_sub(b) as i32) <= 0
-        }
-
-        fn seq_between(start: u32, seq: u32, end: u32) -> bool {
-            !seq_lt(seq, start) && seq_lt(seq, end)
-        }
-
-        let flag_syn = (flags & wire::field::FLG_SYN) != 0;
-        let flag_ack = (flags & wire::field::FLG_ACK) != 0;
-        let flag_fin = (flags & wire::field::FLG_FIN) != 0;
-        let flag_rst = (flags & wire::field::FLG_RST) != 0;
-
-        let send_rst_for_segment =
-            |this: &mut Socket, seg_seq: u32, seg_ack: u32, seg_len: u32, ack_present: bool| {
-                if ack_present {
-                    this.pending.push_back(SendRequest {
-                        seq: seg_ack,
-                        ack: 0,
-                        flags: wire::field::FLG_RST,
-                        wnd: 0,
-                        payload: Vec::new(),
-                        local: this.local,
-                        foreign: this.foreign,
-                    });
-                } else {
-                    this.pending.push_back(SendRequest {
-                        seq: 0,
-                        ack: seg_seq.wrapping_add(seg_len),
-                        flags: wire::field::FLG_RST | wire::field::FLG_ACK,
-                        wnd: 0,
-                        payload: Vec::new(),
-                        local: this.local,
-                        foreign: this.foreign,
-                    });
-                }
-            };
-
-        if self.state == State::SynSent {
-            if flag_ack {
-                if seq_le(seg_ack, self.iss) || seq_lt(self.snd_nxt, seg_ack) {
-                    send_rst_for_segment(self, seg_seq, seg_ack, seg_len, true);
-                    return;
-                }
-            }
-
-            let acceptable_ack =
-                flag_ack && seq_le(self.snd_una, seg_ack) && seq_le(seg_ack, self.snd_nxt);
-
-            if flag_rst {
-                if acceptable_ack {
-                    self.state = State::Closed;
-                }
-                return;
-            }
-
-            if flag_syn {
-                self.irs = seg_seq;
-                self.rcv_nxt = seg_seq.wrapping_add(1);
-
-                if flag_ack {
-                    self.snd_una = seg_ack;
-                    self.cleanup_retransmit();
-                    self.snd_wnd = seg_wnd;
-                    self.snd_wl1 = seg_seq;
-                    self.snd_wl2 = seg_ack;
-                }
-
-                if flag_ack && seq_lt(self.iss, self.snd_una) {
-                    self.state = State::Established;
-                    let _ = self.output(wire::field::FLG_ACK, &[]);
-                } else {
-                    self.state = State::SynReceived;
-                    let _ = self.output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
-                }
-            }
-
-            return;
-        }
-
-        if self.state == State::SynReceived && flag_syn {
-            let _ = self.output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
-            return;
-        }
-
-        let acceptable = if seg_len == 0 {
-            if self.rcv_wnd == 0 {
-                seg_seq == self.rcv_nxt
-            } else {
-                let end = self.rcv_nxt.wrapping_add(self.rcv_wnd as u32);
-                seq_between(self.rcv_nxt, seg_seq, end)
-            }
-        } else if self.rcv_wnd == 0 {
-            false
-        } else {
-            let end = self.rcv_nxt.wrapping_add(self.rcv_wnd as u32);
-            let seg_end = seg_seq.wrapping_add(seg_len - 1);
-            seq_between(self.rcv_nxt, seg_seq, end) || seq_between(self.rcv_nxt, seg_end, end)
-        };
-
-        if !acceptable {
-            if !flag_rst {
-                let _ = self.output(wire::field::FLG_ACK, &[]);
-            }
-            return;
-        }
-
-        if flag_rst {
-            self.state = State::Closed;
-            return;
-        }
-
-        if flag_syn {
-            self.state = State::Closed;
-            send_rst_for_segment(self, seg_seq, seg_ack, seg_len, flag_ack);
-            return;
-        }
-
-        if flag_ack {
-            if self.state == State::SynReceived {
-                if seq_lt(self.snd_una, seg_ack) && seq_le(seg_ack, self.snd_nxt) {
-                    self.snd_una = seg_ack;
-                    self.cleanup_retransmit();
-                    self.snd_wnd = seg_wnd;
-                    self.snd_wl1 = seg_seq;
-                    self.snd_wl2 = seg_ack;
-                    self.state = State::Established;
-                    if self.parent.is_some() {
-                        self.accept_ready = true;
-                    }
-                } else {
-                    send_rst_for_segment(self, seg_seq, seg_ack, seg_len, true);
-                    return;
-                }
-            }
-
-            if seq_lt(self.snd_una, seg_ack) && seq_le(seg_ack, self.snd_nxt) {
-                self.snd_una = seg_ack;
-                self.cleanup_retransmit();
-
-                if seq_lt(self.snd_wl1, seg_seq)
-                    || (self.snd_wl1 == seg_seq && seq_le(self.snd_wl2, seg_ack))
-                {
-                    self.snd_wnd = seg_wnd;
-                    self.snd_wl1 = seg_seq;
-                    self.snd_wl2 = seg_ack;
-                }
-
-                match self.state {
-                    State::FinWait1 => {
-                        if self.snd_una == self.snd_nxt {
-                            self.state = State::FinWait2;
-                        }
-                    }
-                    State::Closing => {
-                        if self.snd_una == self.snd_nxt {
-                            self.state = State::TimeWait;
-                            self.timewait_deadline =
-                                Some(get_time_ms().saturating_add(Self::TIMEWAIT_MS));
-                        }
-                    }
-                    State::LastAck => {
-                        if self.snd_una == self.snd_nxt {
-                            self.state = State::Closed;
-                            return;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        } else if self.state != State::SynReceived {
-            return;
-        }
-
-        let mut send_ack = false;
-
-        if !payload.is_empty()
-            && matches!(
-                self.state,
-                State::Established | State::FinWait1 | State::FinWait2
-            )
-        {
-            if seg_seq == self.rcv_nxt {
-                let space = self.rx_capacity.saturating_sub(self.rx_buf.len());
-                let to_copy = cmp::min(space, payload.len());
-                for b in payload.iter().take(to_copy) {
-                    self.rx_buf.push_back(*b);
-                }
-                self.rcv_nxt = self.rcv_nxt.wrapping_add(to_copy as u32);
-                send_ack = true;
-            } else {
-                send_ack = true;
-            }
-
-            self.rcv_wnd = (self.rx_capacity - self.rx_buf.len()) as u16;
-        }
-
-        if flag_fin {
-            let fin_end = seg_seq.wrapping_add(payload.len() as u32).wrapping_add(1);
-            if seq_lt(self.rcv_nxt, fin_end) {
-                self.rcv_nxt = fin_end;
-            }
-            send_ack = true;
-
-            match self.state {
-                State::SynReceived | State::Established => {
-                    self.state = State::CloseWait;
-                }
-                State::FinWait1 => {
-                    if self.snd_una == self.snd_nxt {
-                        self.state = State::TimeWait;
-                        self.timewait_deadline =
-                            Some(get_time_ms().saturating_add(Self::TIMEWAIT_MS));
-                    } else {
-                        self.state = State::Closing;
-                    }
-                }
-                State::FinWait2 => {
-                    self.state = State::TimeWait;
-                    self.timewait_deadline = Some(get_time_ms().saturating_add(Self::TIMEWAIT_MS));
-                }
-                State::TimeWait => {
-                    self.timewait_deadline = Some(get_time_ms().saturating_add(Self::TIMEWAIT_MS));
-                }
-                _ => {}
-            }
-        }
-
-        if send_ack {
-            let _ = self.output(wire::field::FLG_ACK, &[]);
-        }
+        let seg = SegmentInfo::new(seg_seq, seg_ack, seg_len, seg_wnd, flags, payload);
+        let mut processor = SegmentProcessor::new(self, seg);
+        processor.run();
     }
 
     fn output(&mut self, flags: u8, payload: &[u8]) -> Result<()> {
@@ -812,6 +580,360 @@ impl Socket {
         let addr_ok = self.local.addr.0 == 0 || self.local.addr == local.addr;
         let port_ok = self.local.port == 0 || self.local.port == local.port;
         addr_ok && port_ok
+    }
+}
+
+struct SegmentInfo<'a> {
+    seq: u32,
+    ack: u32,
+    len: u32,
+    wnd: u16,
+    flags: u8,
+    payload: &'a [u8],
+}
+
+impl<'a> SegmentInfo<'a> {
+    fn new(seq: u32, ack: u32, len: u32, wnd: u16, flags: u8, payload: &'a [u8]) -> Self {
+        Self {
+            seq,
+            ack,
+            len,
+            wnd,
+            flags,
+            payload,
+        }
+    }
+
+    fn has_syn(&self) -> bool {
+        (self.flags & wire::field::FLG_SYN) != 0
+    }
+
+    fn has_ack(&self) -> bool {
+        (self.flags & wire::field::FLG_ACK) != 0
+    }
+
+    fn has_fin(&self) -> bool {
+        (self.flags & wire::field::FLG_FIN) != 0
+    }
+
+    fn has_rst(&self) -> bool {
+        (self.flags & wire::field::FLG_RST) != 0
+    }
+}
+
+struct SegmentProcessor<'a> {
+    sock: &'a mut Socket,
+    seg: SegmentInfo<'a>,
+    send_ack: bool,
+}
+
+impl<'a> SegmentProcessor<'a> {
+    fn new(sock: &'a mut Socket, seg: SegmentInfo<'a>) -> Self {
+        Self {
+            sock,
+            seg,
+            send_ack: false,
+        }
+    }
+
+    fn run(&mut self) {
+        if self.handle_syn_sent() {
+            return;
+        }
+        if self.handle_syn_received_duplicate() {
+            return;
+        }
+        if !self.validate_window() {
+            return;
+        }
+
+        if self.seg.has_rst() {
+            self.sock.state = State::Closed;
+            return;
+        }
+
+        if self.seg.has_syn() {
+            self.sock.state = State::Closed;
+            self.send_rst_for_segment(self.seg.has_ack());
+            return;
+        }
+
+        if !self.handle_ack() {
+            return;
+        }
+
+        self.handle_payload();
+        self.handle_fin();
+
+        if self.send_ack {
+            let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+        }
+    }
+
+    fn handle_syn_sent(&mut self) -> bool {
+        if self.sock.state != State::SynSent {
+            return false;
+        }
+
+        if self.seg.has_ack() {
+            if Self::seq_le(self.seg.ack, self.sock.iss)
+                || Self::seq_lt(self.sock.snd_nxt, self.seg.ack)
+            {
+                self.send_rst_for_segment(true);
+                return true;
+            }
+        }
+
+        let acceptable_ack = self.seg.has_ack()
+            && Self::seq_le(self.sock.snd_una, self.seg.ack)
+            && Self::seq_le(self.seg.ack, self.sock.snd_nxt);
+
+        if self.seg.has_rst() {
+            if acceptable_ack {
+                self.sock.state = State::Closed;
+            }
+            return true;
+        }
+
+        if self.seg.has_syn() {
+            self.sock.irs = self.seg.seq;
+            self.sock.rcv_nxt = self.seg.seq.wrapping_add(1);
+
+            if self.seg.has_ack() {
+                self.sock.snd_una = self.seg.ack;
+                self.sock.cleanup_retransmit();
+                self.sock.snd_wnd = self.seg.wnd;
+                self.sock.snd_wl1 = self.seg.seq;
+                self.sock.snd_wl2 = self.seg.ack;
+            }
+
+            if self.seg.has_ack() && Self::seq_lt(self.sock.iss, self.sock.snd_una) {
+                self.sock.state = State::Established;
+                let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+            } else {
+                self.sock.state = State::SynReceived;
+                let _ = self
+                    .sock
+                    .output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
+            }
+        }
+
+        true
+    }
+
+    fn handle_syn_received_duplicate(&mut self) -> bool {
+        if self.sock.state != State::SynReceived || !self.seg.has_syn() {
+            return false;
+        }
+        let _ = self
+            .sock
+            .output(wire::field::FLG_SYN | wire::field::FLG_ACK, &[]);
+        true
+    }
+
+    fn validate_window(&mut self) -> bool {
+        let rcv_nxt = self.sock.rcv_nxt;
+        let rcv_wnd = self.sock.rcv_wnd;
+        let seg_seq = self.seg.seq;
+        let seg_len = self.seg.len;
+
+        if seg_len == 0 {
+            if rcv_wnd == 0 {
+                return self.accept_or_ack(seg_seq == rcv_nxt);
+            }
+            let end = rcv_nxt.wrapping_add(rcv_wnd as u32);
+            return self.accept_or_ack(Self::seq_between(rcv_nxt, seg_seq, end));
+        }
+
+        if rcv_wnd == 0 {
+            return self.accept_or_ack(false);
+        }
+
+        let end = rcv_nxt.wrapping_add(rcv_wnd as u32);
+        let seg_end = seg_seq.wrapping_add(seg_len - 1);
+        self.accept_or_ack(
+            Self::seq_between(rcv_nxt, seg_seq, end) || Self::seq_between(rcv_nxt, seg_end, end),
+        )
+    }
+
+    fn handle_ack(&mut self) -> bool {
+        if !self.seg.has_ack() {
+            return self.sock.state == State::SynReceived;
+        }
+
+        let ack_ok = self.ack_in_window();
+
+        if self.sock.state == State::SynReceived {
+            if !ack_ok {
+                self.send_rst_for_segment(true);
+                return false;
+            }
+
+            self.sock.snd_una = self.seg.ack;
+            self.sock.cleanup_retransmit();
+            self.sock.snd_wnd = self.seg.wnd;
+            self.sock.snd_wl1 = self.seg.seq;
+            self.sock.snd_wl2 = self.seg.ack;
+            self.sock.state = State::Established;
+            if self.sock.parent.is_some() {
+                self.sock.accept_ready = true;
+            }
+            return true;
+        }
+
+        if !ack_ok {
+            return true;
+        }
+
+        self.sock.snd_una = self.seg.ack;
+        self.sock.cleanup_retransmit();
+
+        if Self::seq_lt(self.sock.snd_wl1, self.seg.seq)
+            || (self.sock.snd_wl1 == self.seg.seq && Self::seq_le(self.sock.snd_wl2, self.seg.ack))
+        {
+            self.sock.snd_wnd = self.seg.wnd;
+            self.sock.snd_wl1 = self.seg.seq;
+            self.sock.snd_wl2 = self.seg.ack;
+        }
+
+        match self.sock.state {
+            State::FinWait1 => {
+                if self.sock.snd_una == self.sock.snd_nxt {
+                    self.sock.state = State::FinWait2;
+                }
+            }
+            State::Closing => {
+                if self.sock.snd_una == self.sock.snd_nxt {
+                    self.sock.state = State::TimeWait;
+                    self.sock.timewait_deadline =
+                        Some(get_time_ms().saturating_add(Socket::TIMEWAIT_MS));
+                }
+            }
+            State::LastAck => {
+                if self.sock.snd_una == self.sock.snd_nxt {
+                    self.sock.state = State::Closed;
+                    return false;
+                }
+            }
+            _ => {}
+        }
+
+        true
+    }
+
+    fn handle_payload(&mut self) {
+        if self.seg.payload.is_empty() {
+            return;
+        }
+        if !matches!(
+            self.sock.state,
+            State::Established | State::FinWait1 | State::FinWait2
+        ) {
+            return;
+        }
+
+        if self.seg.seq == self.sock.rcv_nxt {
+            let space = self.sock.rx_capacity.saturating_sub(self.sock.rx_buf.len());
+            let to_copy = cmp::min(space, self.seg.payload.len());
+            for b in self.seg.payload.iter().take(to_copy) {
+                self.sock.rx_buf.push_back(*b);
+            }
+            self.sock.rcv_nxt = self.sock.rcv_nxt.wrapping_add(to_copy as u32);
+            self.send_ack = true;
+        } else {
+            self.send_ack = true;
+        }
+
+        self.sock.rcv_wnd = (self.sock.rx_capacity - self.sock.rx_buf.len()) as u16;
+    }
+
+    fn handle_fin(&mut self) {
+        if !self.seg.has_fin() {
+            return;
+        }
+
+        let fin_end = self
+            .seg
+            .seq
+            .wrapping_add(self.seg.payload.len() as u32)
+            .wrapping_add(1);
+        if Self::seq_lt(self.sock.rcv_nxt, fin_end) {
+            self.sock.rcv_nxt = fin_end;
+        }
+        self.send_ack = true;
+
+        match self.sock.state {
+            State::SynReceived | State::Established => {
+                self.sock.state = State::CloseWait;
+            }
+            State::FinWait1 => {
+                if self.sock.snd_una == self.sock.snd_nxt {
+                    self.sock.state = State::TimeWait;
+                    self.sock.timewait_deadline =
+                        Some(get_time_ms().saturating_add(Socket::TIMEWAIT_MS));
+                } else {
+                    self.sock.state = State::Closing;
+                }
+            }
+            State::FinWait2 => {
+                self.sock.state = State::TimeWait;
+                self.sock.timewait_deadline =
+                    Some(get_time_ms().saturating_add(Socket::TIMEWAIT_MS));
+            }
+            State::TimeWait => {
+                self.sock.timewait_deadline =
+                    Some(get_time_ms().saturating_add(Socket::TIMEWAIT_MS));
+            }
+            _ => {}
+        }
+    }
+
+    fn send_rst_for_segment(&mut self, ack_present: bool) {
+        if ack_present {
+            self.sock.pending.push_back(SendRequest {
+                seq: self.seg.ack,
+                ack: 0,
+                flags: wire::field::FLG_RST,
+                wnd: 0,
+                payload: Vec::new(),
+                local: self.sock.local,
+                foreign: self.sock.foreign,
+            });
+        } else {
+            self.sock.pending.push_back(SendRequest {
+                seq: 0,
+                ack: self.seg.seq.wrapping_add(self.seg.len),
+                flags: wire::field::FLG_RST | wire::field::FLG_ACK,
+                wnd: 0,
+                payload: Vec::new(),
+                local: self.sock.local,
+                foreign: self.sock.foreign,
+            });
+        }
+    }
+
+    fn accept_or_ack(&mut self, acceptable: bool) -> bool {
+        if !acceptable && !self.seg.has_rst() {
+            let _ = self.sock.output(wire::field::FLG_ACK, &[]);
+        }
+        acceptable
+    }
+
+    fn ack_in_window(&self) -> bool {
+        Self::seq_lt(self.sock.snd_una, self.seg.ack)
+            && Self::seq_le(self.seg.ack, self.sock.snd_nxt)
+    }
+
+    fn seq_lt(a: u32, b: u32) -> bool {
+        (a.wrapping_sub(b) as i32) < 0
+    }
+
+    fn seq_le(a: u32, b: u32) -> bool {
+        (a.wrapping_sub(b) as i32) <= 0
+    }
+
+    fn seq_between(start: u32, seq: u32, end: u32) -> bool {
+        !Self::seq_lt(seq, start) && Self::seq_lt(seq, end)
     }
 }
 
@@ -1279,6 +1401,42 @@ mod tests {
 
             let packet = wire::Packet::new_checked(&buffer).unwrap();
             assert!(packet.verify_checksum(src_ip, dst_ip));
+        }
+    }
+
+    mod segment_tests {
+        use super::*;
+
+        #[test_case]
+        fn validate_window_zero_len_zero_wnd() {
+            let mut socket = Socket::new(1, 1);
+            socket.rcv_nxt = 100;
+            socket.rcv_wnd = 0;
+
+            let seg_ok = SegmentInfo::new(100, 0, 0, 0, wire::field::FLG_RST, &[]);
+            let mut proc_ok = SegmentProcessor::new(&mut socket, seg_ok);
+            assert!(proc_ok.validate_window());
+
+            let seg_ng = SegmentInfo::new(99, 0, 0, 0, wire::field::FLG_RST, &[]);
+            let mut proc_ng = SegmentProcessor::new(&mut socket, seg_ng);
+            assert!(!proc_ng.validate_window());
+        }
+
+        #[test_case]
+        fn handle_ack_synreceived_transitions() {
+            let mut socket = Socket::new(1, 1);
+            socket.state = State::SynReceived;
+            socket.snd_una = 10;
+            socket.snd_nxt = 20;
+            socket.parent = Some(0);
+
+            let seg = SegmentInfo::new(5, 15, 0, 4096, wire::field::FLG_ACK, &[]);
+            let mut proc = SegmentProcessor::new(&mut socket, seg);
+            assert!(proc.handle_ack());
+            assert_eq!(socket.state, State::Established);
+            assert!(socket.accept_ready);
+            assert_eq!(socket.snd_una, 15);
+            assert_eq!(socket.snd_wnd, 4096);
         }
     }
 }
