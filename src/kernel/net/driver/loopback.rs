@@ -9,23 +9,24 @@ use crate::{
         ip::IpAddr,
         protocol,
     },
+    println, trace,
 };
 
 const LOOPBACK_MTU: u16 = u16::MAX;
 
 fn loopback_transmit(dev: &mut NetDevice, data: &[u8]) -> Result<()> {
-    crate::trace!(DRIVER, "[loopback] transmit {} bytes", data.len());
+    trace!(DRIVER, "[loopback] transmit {} bytes", data.len());
     protocol::net_ingress_handler(dev, data)
 }
 
 fn loopback_open(dev: &mut NetDevice) -> Result<()> {
-    crate::trace!(DRIVER, "[loopback] device opened");
+    trace!(DRIVER, "[loopback] device opened");
     dev.set_flags(dev.flags() | NetDeviceFlags::UP | NetDeviceFlags::RUNNING);
     Ok(())
 }
 
 fn loopback_close(dev: &mut NetDevice) -> Result<()> {
-    crate::trace!(DRIVER, "[loopback] device closed");
+    trace!(DRIVER, "[loopback] device closed");
     dev.set_flags(dev.flags() & !NetDeviceFlags::RUNNING);
     Ok(())
 }
@@ -49,7 +50,7 @@ pub fn init() -> Result<()> {
     });
     dev.open()?;
     net_device_register(dev)?;
-    crate::println!("[net] Loopback device initialized");
+    println!("[net] Loopback device initialized");
     Ok(())
 }
 
@@ -58,6 +59,6 @@ pub fn setup_iface() -> Result<()> {
         let iface = NetInterface::new(IpAddr::LOOPBACK, IpAddr::new(255, 0, 0, 0));
         dev.add_interface(iface);
     })?;
-    crate::println!("[net] Loopback interface configured: 127.0.0.1/8");
+    println!("[net] Loopback interface configured: 127.0.0.1/8");
     Ok(())
 }

@@ -2,6 +2,7 @@ extern crate alloc;
 use crate::error::{Error, Result};
 use crate::net::device::{NetDevice, NetDeviceFlags};
 use crate::net::protocol::{net_protocol_handler, ProtocolType};
+use crate::trace;
 use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -125,7 +126,7 @@ pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
     let frame = wire::Frame::new_checked(data)?;
     let etype = frame.ethertype();
 
-    crate::trace!(
+    trace!(
         ETHER,
         "[ether] ingress: ethertype=0x{:04x}, len={}",
         etype,
@@ -137,7 +138,7 @@ pub fn ingress(dev: &NetDevice, data: &[u8]) -> Result<()> {
         ETHERTYPE_ARP => crate::net::arp::ingress(dev, payload),
         ETHERTYPE_IPV4 => net_protocol_handler(dev, ProtocolType::IP, payload),
         _ => {
-            crate::trace!(ETHER, "[ether] unsupported ethertype: 0x{:04x}", etype);
+            trace!(ETHER, "[ether] unsupported ethertype: 0x{:04x}", etype);
             Err(Error::UnsupportedProtocol)
         }
     }
@@ -155,7 +156,7 @@ pub fn egress(dev: &mut NetDevice, dst_mac: MacAddr, ethertype: u16, payload: &[
         hdr.set_ethertype(ethertype);
         hdr.payload_mut().copy_from_slice(payload);
     }
-    crate::trace!(
+    trace!(
         ETHER,
         "[ether] egress: dst={:02x?} type=0x{:04x} len={}",
         dst_mac.0,

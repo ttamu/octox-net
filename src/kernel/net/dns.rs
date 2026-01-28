@@ -2,7 +2,7 @@ use super::{
     ip::{IpAddr, IpEndpoint},
     udp,
 };
-use crate::error::{Error, Result};
+use crate::{error::{Error, Result}, net::poll, trace};
 extern crate alloc;
 use alloc::{vec, vec::Vec};
 
@@ -135,7 +135,7 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
     let header = wire::Header::new_checked(data)?;
     let ancount = header.ancount();
 
-    crate::trace!(
+    trace!(
         DNS,
         "[dns] Response: id={:04x}, flags={:04x}, questions={}, answers={}",
         header.id(),
@@ -217,7 +217,7 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
 
         offset += 10;
 
-        crate::trace!(
+        trace!(
             DNS,
             "[dns] Answer {}: type={}, class={}, ttl={}, rdlen={}",
             i + 1,
@@ -249,8 +249,8 @@ fn parse_dns_response(data: &[u8]) -> Result<IpAddr> {
 }
 
 pub fn resolve(domain: &str) -> Result<IpAddr> {
-    crate::trace!(DNS, "[dns] Resolving: {}", domain);
-    crate::trace!(DNS, "[dns] Querying upstream DNS server...");
+    trace!(DNS, "[dns] Resolving: {}", domain);
+    trace!(DNS, "[dns] Querying upstream DNS server...");
     let sockfd = udp::socket_alloc()?;
     let local = IpEndpoint::any(0);
     if let Err(err) = udp::socket_bind(sockfd, local) {
@@ -261,7 +261,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
     let query_id = 0x1234; // TODO: ランダムIDを使用
     let query = build_dns_query(domain, query_id);
 
-    crate::trace!(
+    trace!(
         DNS,
         "[dns] Sending query to {}.{}.{}.{}:53 ({} bytes)",
         (DNS_SERVER.0 >> 24) & 0xFF,
@@ -280,11 +280,11 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
     let mut buf = alloc::vec![0u8; 512];
     let max_attempts = 100;
     for attempt in 0..max_attempts {
-        crate::net::poll();
+        poll();
 
         match udp::socket_recvfrom(sockfd, &mut buf) {
             Ok((len, src)) => {
-                crate::trace!(
+                trace!(
                     DNS,
                     "[dns] Received {} bytes from {}:{} (attempt {})",
                     len,
@@ -296,7 +296,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
                 match parse_dns_response(&buf[..len]) {
                     Ok(addr) => {
                         udp::socket_free(sockfd)?;
-                        crate::trace!(
+                        trace!(
                             DNS,
                             "[dns] Resolved {} to {}.{}.{}.{}",
                             domain,
@@ -308,7 +308,7 @@ pub fn resolve(domain: &str) -> Result<IpAddr> {
                         return Ok(addr);
                     }
                     Err(e) => {
-                        crate::trace!(DNS, "[dns] Failed to parse response: {:?}", e);
+                        trace!(DNS, "[dns] Failed to parse response: {:?}", e);
                     }
                 }
             }

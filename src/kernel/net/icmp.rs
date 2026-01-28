@@ -5,8 +5,9 @@ use super::{
 use crate::{
     condvar::Condvar,
     error::{Error, Result},
-    net::device::net_device_by_name,
+    net::{device::net_device_by_name, poll},
     spinlock::Mutex,
+    trace,
 };
 use alloc::{collections::VecDeque, vec, vec::Vec};
 use core::mem::size_of;
@@ -190,7 +191,7 @@ impl IcmpCore {
         seq: u16,
         payload: &[u8],
     ) -> Result<()> {
-        crate::trace!(
+        trace!(
             ICMP,
             "[icmp] Received Echo Request from {:?}, id={}, seq={}",
             src.to_bytes(),
@@ -201,7 +202,7 @@ impl IcmpCore {
     }
 
     fn handle_echo_reply(&self, src: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-        crate::trace!(
+        trace!(
             ICMP,
             "[icmp] Received Echo Reply from {:?}, id={}, seq={}",
             src.to_bytes(),
@@ -213,7 +214,7 @@ impl IcmpCore {
 
     fn handle_unreachable(&self, src: IpAddr, code: u8, payload: &[u8]) -> Result<()> {
         let (orig_id, orig_seq) = self.parse_unreachable(payload)?;
-        crate::trace!(
+        trace!(
             ICMP,
             "[icmp] Destination Unreachable code={} for id={}, seq={}",
             code,
@@ -274,7 +275,7 @@ impl IcmpCore {
         let csum = checksum(&packet);
         write_u16(&mut packet[2..4], csum);
 
-        crate::trace!(
+        trace!(
             ICMP,
             "[icmp] Sending Echo Reply to {:?}, id={}, seq={}",
             dst.to_bytes(),
@@ -301,7 +302,7 @@ impl IcmpCore {
         let csum = checksum(&packet);
         write_u16(&mut packet[2..4], csum);
 
-        crate::trace!(
+        trace!(
             ICMP,
             "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
             dst.to_bytes(),
@@ -341,7 +342,7 @@ impl IcmpCore {
         let tick_ms = crate::param::TICK_MS as u64;
         let timeout_ticks = timeout_ms.div_ceil(tick_ms);
         loop {
-            crate::net::poll();
+            poll();
             if let Some(reply) = {
                 let mut q = self.replies.lock();
                 q.iter()

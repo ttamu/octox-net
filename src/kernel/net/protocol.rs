@@ -2,6 +2,7 @@ use crate::{
     error::{Error, Result},
     net::{device::NetDevice, device::NetDeviceFlags},
     spinlock::Mutex,
+    println, trace,
 };
 use alloc::vec::Vec;
 
@@ -32,7 +33,7 @@ impl ProtocolRegistry {
         let mut protocols = self.protocols.lock();
         protocols.push(Protocol { ptype, handler });
         drop(protocols);
-        crate::println!("[net] Registered protocol: {:?}", ptype);
+        println!("[net] Registered protocol: {:?}", ptype);
     }
 
     fn handler(&self, dev: &NetDevice, ptype: ProtocolType, data: &[u8]) -> Result<()> {
@@ -50,7 +51,7 @@ impl ProtocolRegistry {
     }
 
     fn ingress(&self, dev: &NetDevice, data: &[u8]) -> Result<()> {
-        crate::trace!(
+        trace!(
             DRIVER,
             "[net] ingress {} bytes from {}",
             data.len(),

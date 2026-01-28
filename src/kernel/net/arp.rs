@@ -4,7 +4,9 @@ use crate::error::{Error, Result};
 use crate::net::device::{NetDevice, NetDeviceFlags};
 use crate::net::ethernet::{egress as eth_egress, MacAddr, ETHERTYPE_ARP};
 use crate::net::ip::IpAddr;
+use crate::net::poll;
 use crate::spinlock::Mutex;
+use crate::trace;
 use alloc::vec::Vec;
 
 const ARP_HTYPE_ETHERNET: u16 = 1;
@@ -184,7 +186,7 @@ impl ArpCache {
                 });
             }
         }
-        crate::trace!(ARP, "[arp] insert {:?} -> {}", ip.to_bytes(), mac);
+        trace!(ARP, "[arp] insert {:?} -> {}", ip.to_bytes(), mac);
         self.cv.notify_all();
     }
 
@@ -202,7 +204,7 @@ impl ArpCache {
         let sender_mac = MacAddr(pkt.sha());
         let target_ip = IpAddr(pkt.tpa());
 
-        crate::trace!(
+        trace!(
             ARP,
             "[arp] oper={} sender={:?} target={:?}",
             oper,
@@ -212,7 +214,7 @@ impl ArpCache {
 
         match oper {
             ARP_OP_REPLY => {
-                crate::trace!(ARP, "[arp] reply from {:?}", sender_ip.to_bytes());
+                trace!(ARP, "[arp] reply from {:?}", sender_ip.to_bytes());
                 self.insert(sender_ip, sender_mac);
             }
             ARP_OP_REQUEST => {
@@ -277,7 +279,7 @@ impl ArpCache {
         timeout_ticks: usize,
     ) -> Result<MacAddr> {
         if let Some(mac) = self.lookup(target_ip) {
-            crate::trace!(ARP, "[arp] cache hit {:?}", mac);
+            trace!(ARP, "[arp] cache hit {:?}", mac);
             return Ok(mac);
         }
 
@@ -285,7 +287,7 @@ impl ArpCache {
             if !dev.flags().contains(NetDeviceFlags::UP) {
                 return Err(Error::NotConnected);
             }
-            crate::trace!(
+            trace!(
                 ARP,
                 "[arp] send request who-has {:?} tell {:?}",
                 target_ip.to_bytes(),
@@ -296,9 +298,9 @@ impl ArpCache {
 
         let start = *crate::trap::TICKS.lock();
         loop {
-            crate::net::poll();
+            poll();
             if let Some(mac) = self.lookup(target_ip) {
-                crate::trace!(
+                trace!(
                     ARP,
                     "[arp] resolved {:?} -> {:02x?}",
                     target_ip.to_bytes(),
@@ -308,7 +310,7 @@ impl ArpCache {
             }
             let elapsed = *crate::trap::TICKS.lock() - start;
             if elapsed > timeout_ticks {
-                crate::trace!(ARP, "[arp] timeout waiting reply");
+                trace!(ARP, "[arp] timeout waiting reply");
                 return Err(Error::Timeout);
             }
             crate::proc::yielding();

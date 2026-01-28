@@ -6,6 +6,7 @@ use crate::{
     error::{Error, Result},
     net::socket::{SocketHandle, SocketSet},
     spinlock::Mutex,
+    trace,
 };
 extern crate alloc;
 use alloc::{collections::VecDeque, vec::Vec};
@@ -206,7 +207,7 @@ impl Udp {
             return Err(Error::InvalidLength);
         }
 
-        crate::trace!(
+        trace!(
             UDP,
             "[udp] received: {}:{} -> {}:{}, {} bytes",
             src.to_bytes()[0],
@@ -238,7 +239,7 @@ impl Udp {
                 data: payload.to_vec(),
             };
             socket.recv_queue.push_back(packet);
-            crate::trace!(UDP, "[udp] packet queued for port {}", dst_port);
+            trace!(UDP, "[udp] packet queued for port {}", dst_port);
             return Ok(());
         }
 
@@ -323,7 +324,7 @@ pub fn egress(src: IpEndpoint, dst: IpEndpoint, data: &[u8]) -> Result<()> {
     let mut header = wire::PacketMut::new_unchecked(&mut packet);
     header.set_checksum(checksum_value);
 
-    crate::trace!(
+    trace!(
         UDP,
         "[udp] sending: {}:{} -> {}:{}, {} bytes",
         src.addr.to_bytes()[0],

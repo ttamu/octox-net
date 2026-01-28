@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use crate::net::ip::{self, IpAddr, IpEndpoint};
 use crate::net::socket::{SocketHandle, SocketSet};
 use crate::spinlock::Mutex;
+use crate::trace;
 use alloc::{collections::VecDeque, vec::Vec};
 use core::cmp;
 use core::sync::atomic::{AtomicU16, Ordering};
@@ -393,7 +394,7 @@ impl Tcp {
     }
 
     pub fn ingress(&self, src_ip: IpAddr, dst_ip: IpAddr, data: &[u8]) -> Result<()> {
-        crate::trace!(
+        trace!(
             TCP,
             "[tcp] ingress: {} bytes from {:?}",
             data.len(),
@@ -405,7 +406,7 @@ impl Tcp {
             return Err(Error::ChecksumError);
         }
 
-        crate::trace!(
+        trace!(
             TCP,
             "[tcp] packet: sport={} dport={} seq={} ack={} flags=0x{:02x}",
             packet.src_port(),

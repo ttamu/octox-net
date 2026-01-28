@@ -15,12 +15,13 @@ pub mod udp;
 pub mod util;
 
 use core::sync::atomic::{AtomicBool, Ordering};
+use crate::println;
 
 static NET_POLL_PENDING: AtomicBool = AtomicBool::new(false);
 static NET_POLL_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub fn init() {
-    crate::println!("[kernel] Network stack init");
+    println!("[kernel] Network stack init");
 
     ip::ip_init();
 
@@ -30,7 +31,7 @@ pub fn init() {
     driver::virtio_net::init().expect("virtio-net init failed");
     driver::virtio_net::setup_iface().expect("virtio-net iface failed");
 
-    crate::println!("[kernel] Network stack initialized");
+    println!("[kernel] Network stack initialized");
 }
 
 pub fn poll() {

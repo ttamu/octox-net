@@ -5,9 +5,9 @@ use super::{
 use crate::{
     error::{Error, Result},
     net::{
-        device::{net_device_by_name, NetDevice},
-        icmp, tcp, udp,
+        arp, device::{net_device_by_name, NetDevice}, ethernet, icmp, route, tcp, udp,
     },
+    println, trace,
 };
 extern crate alloc;
 use core::mem::size_of;
@@ -242,7 +242,7 @@ pub fn ingress(_dev: &NetDevice, data: &[u8]) -> Result<()> {
     let src = IpAddr(header.src());
     let dst = IpAddr(header.dst());
 
-    crate::trace!(
+    trace!(
         IP,
         "[ip] received packet: {:?} -> {:?}, proto={}",
         src.to_bytes(),
@@ -281,7 +281,7 @@ pub fn egress(dev: &NetDevice, protocol: u8, src: IpAddr, dst: IpAddr, data: &[u
     }
     packet[size_of::<IpHeader>()..].copy_from_slice(data);
 
-    crate::trace!(
+    trace!(
         IP,
         "[ip] sending packet: {:?} -> {:?}, {} bytes",
         src.to_bytes(),
@@ -298,7 +298,7 @@ pub fn get_source_address(dst: IpAddr) -> Option<IpAddr> {
         return Some(IpAddr::LOOPBACK);
     }
 
-    let route = crate::net::route::lookup(dst)?;
+    let route = route::lookup(dst)?;
     let dev = net_device_by_name(route.dev)?;
 
     if let Some(iface) = dev
@@ -314,16 +314,16 @@ pub fn get_source_address(dst: IpAddr) -> Option<IpAddr> {
 
 pub fn egress_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
     if dst.0 == IpAddr::LOOPBACK.0 {
-        let dev = crate::net::device::net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
+        let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
         return egress(&dev, protocol, IpAddr::LOOPBACK, dst, payload);
     }
 
-    if let Some(route) = crate::net::route::lookup(dst) {
+    if let Some(route) = route::lookup(dst) {
         let dev = net_device_by_name(route.dev).ok_or(Error::DeviceNotFound)?;
         let src = get_source_address(dst).unwrap_or(IpAddr::LOOPBACK);
 
         let next_hop = route.gateway.unwrap_or(dst);
-        let mac = crate::net::arp::resolve(dev.name(), next_hop, src, crate::param::TICK_HZ)
+        let mac = arp::resolve(dev.name(), next_hop, src, crate::param::TICK_HZ)
             .map_err(|_| Error::Timeout)?;
         let mut dev_clone = dev.clone();
         let total_len = core::mem::size_of::<super::ip::IpHeader>() + payload.len();
@@ -343,10 +343,10 @@ pub fn egress_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
             hdr.fill_checksum();
         }
         ip_packet[core::mem::size_of::<super::ip::IpHeader>()..].copy_from_slice(payload);
-        return crate::net::ethernet::egress(
+        return ethernet::egress(
             &mut dev_clone,
             mac,
-            crate::net::ethernet::ETHERTYPE_IPV4,
+            ethernet::ETHERTYPE_IPV4,
             &ip_packet,
         );
     }
@@ -355,7 +355,7 @@ pub fn egress_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
 }
 
 pub fn ip_init() {
-    crate::println!("[net] IP layer init");
+    println!("[net] IP layer init");
     net_protocol_register(ProtocolType::IP, ingress);
 }
 

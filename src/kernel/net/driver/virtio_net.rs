@@ -6,13 +6,15 @@ use crate::{
     memlayout::VIRTIO1,
     net::{
         device::{
-            net_device_register, NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps,
-            NetDeviceType,
+            net_device_by_name, net_device_register, NetDevice, NetDeviceConfig, NetDeviceFlags,
+            NetDeviceOps, NetDeviceType,
         },
         ethernet,
         ip::IpAddr,
+        request_poll,
     },
     spinlock::Mutex,
+    println, trace,
 };
 use alloc::vec::Vec;
 use core::sync::atomic::{fence, Ordering};
@@ -316,7 +318,7 @@ impl VirtioNet {
             let used_elem = self.used_rx.ring[(self.used_idx_rx as usize) % NUM];
             let id = used_elem.id as usize;
             if id >= NUM {
-                crate::trace!(DRIVER, "[virtio-net] invalid RX descriptor id: {}", id);
+                trace!(DRIVER, "[virtio-net] invalid RX descriptor id: {}", id);
                 self.used_idx_rx = self.used_idx_rx.wrapping_add(1);
                 continue;
             }
@@ -338,7 +340,7 @@ impl VirtioNet {
             let used_elem = self.used_tx.ring[(self.used_idx_tx as usize) % NUM];
             let id = used_elem.id as usize;
             if id >= NUM {
-                crate::trace!(DRIVER, "[virtio-net] invalid TX descriptor id: {}", id);
+                trace!(DRIVER, "[virtio-net] invalid TX descriptor id: {}", id);
                 self.used_idx_tx = self.used_idx_tx.wrapping_add(1);
                 continue;
             }
@@ -390,7 +392,7 @@ pub fn init() -> Result<()> {
     });
     dev.open()?;
     net_device_register(dev)?;
-    crate::println!("[net] virtio-net initialized MAC {:02x?}", guard.mac);
+    println!("[net] virtio-net initialized MAC {:02x?}", guard.mac);
     Ok(())
 }
 
@@ -418,7 +420,7 @@ pub fn poll_rx() {
     let mut guard = NET.lock();
     if let Ok(pkts) = guard.handle_used() {
         if !pkts.is_empty() {
-            crate::trace!(
+            trace!(
                 DRIVER,
                 "[virtio-net] poll_rx: received {} packets",
                 pkts.len()
@@ -426,7 +428,7 @@ pub fn poll_rx() {
         }
         drop(guard);
         for p in pkts {
-            let dev = crate::net::device::net_device_by_name("eth0").unwrap();
+            let dev = net_device_by_name("eth0").unwrap();
             let _ = ethernet::ingress(&dev, p.as_slice());
         }
     }
@@ -435,5 +437,5 @@ pub fn poll_rx() {
 pub fn intr() {
     let intr_stat = Mmio::InterruptStatus.read();
     unsafe { Mmio::InterruptAck.write(intr_stat & 0x3) };
-    crate::net::request_poll();
+    request_poll();
 }
