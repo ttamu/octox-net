@@ -214,7 +214,8 @@ pub extern "C" fn kerneltrap() {
 fn clockintr() {
     let mut ticks = TICKS.lock();
     *ticks += 1;
-    proc::wakeup(&(*ticks) as *const _ as usize)
+    proc::wakeup(&(*ticks) as *const _ as usize);
+    crate::net::request_poll();
 }
 
 // check if it's an external interrupt or software interrupt,

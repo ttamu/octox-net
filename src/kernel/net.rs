@@ -14,6 +14,11 @@ pub mod trace;
 pub mod udp;
 pub mod util;
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static NET_POLL_PENDING: AtomicBool = AtomicBool::new(false);
+static NET_POLL_RUNNING: AtomicBool = AtomicBool::new(false);
+
 pub fn init() {
     crate::println!("[kernel] Network stack init");
 
@@ -31,4 +36,28 @@ pub fn init() {
 pub fn poll() {
     driver::virtio_net::poll_rx();
     let _ = tcp::poll();
+}
+
+pub fn request_poll() {
+    NET_POLL_PENDING.store(true, Ordering::Release);
+}
+
+pub fn poll_if_pending() {
+    if !NET_POLL_PENDING.load(Ordering::Acquire) {
+        return;
+    }
+
+    if NET_POLL_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    loop {
+        NET_POLL_PENDING.store(false, Ordering::Release);
+        poll();
+        if !NET_POLL_PENDING.load(Ordering::Acquire) {
+            break;
+        }
+    }
+
+    NET_POLL_RUNNING.store(false, Ordering::Release);
 }

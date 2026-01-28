@@ -435,4 +435,5 @@ pub fn poll_rx() {
 pub fn intr() {
     let intr_stat = Mmio::InterruptStatus.read();
     unsafe { Mmio::InterruptAck.write(intr_stat & 0x3) };
+    crate::net::request_poll();
 }
