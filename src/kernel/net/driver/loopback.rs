@@ -2,8 +2,8 @@ use crate::{
     error::Result,
     net::{
         device::{
-            net_device_register, net_device_with_mut, NetDevice, NetDeviceFlags, NetDeviceOps,
-            NetDeviceType,
+            net_device_register, net_device_with_mut, NetDevice, NetDeviceConfig, NetDeviceFlags,
+            NetDeviceOps, NetDeviceType,
         },
         interface::NetInterface,
         ip::IpAddr,
@@ -37,16 +37,16 @@ pub fn loopback_init() -> Result<()> {
         close: loopback_close,
     };
 
-    let mut dev = NetDevice::new(
-        "lo",
-        NetDeviceType::Loopback,
-        LOOPBACK_MTU,
-        NetDeviceFlags::LOOPBACK | NetDeviceFlags::BROADCAST,
-        0,
-        0,
-        crate::net::ethernet::MacAddr([0; 6]),
+    let mut dev = NetDevice::new(NetDeviceConfig {
+        name: "lo",
+        dev_type: NetDeviceType::Loopback,
+        mtu: LOOPBACK_MTU,
+        flags: NetDeviceFlags::LOOPBACK | NetDeviceFlags::BROADCAST,
+        header_len: 0,
+        addr_len: 0,
+        hw_addr: crate::net::ethernet::MacAddr([0; 6]),
         ops,
-    );
+    });
     dev.open()?;
     net_device_register(dev)?;
     crate::println!("[net] Loopback device initialized");

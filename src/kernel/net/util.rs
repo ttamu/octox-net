@@ -74,14 +74,14 @@ pub fn verify_checksum(data: &[u8]) -> bool {
 use crate::error::{Error, Result};
 use core::mem::size_of;
 
-pub fn parse_header<'a, H: Sized>(data: &'a [u8]) -> Result<&'a H> {
+pub fn parse_header<H: Sized>(data: &[u8]) -> Result<&H> {
     if data.len() < size_of::<H>() {
         return Err(Error::PacketTooShort);
     }
     Ok(unsafe { &*(data.as_ptr() as *const H) })
 }
 
-pub fn parse_header_mut<'a, H: Sized>(data: &'a mut [u8]) -> Result<&'a mut H> {
+pub fn parse_header_mut<H: Sized>(data: &mut [u8]) -> Result<&mut H> {
     if data.len() < size_of::<H>() {
         return Err(Error::PacketTooShort);
     }

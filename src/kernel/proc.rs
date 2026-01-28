@@ -308,6 +308,12 @@ impl Context {
     }
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Default for Procs {
     fn default() -> Self {
         Self::new()
@@ -525,7 +531,7 @@ pub fn user_init(initcode: &'static [u8]) {
     unsafe {
         let (head, body, _) = initcode[0..size_of::<ElfHdr>()].align_to::<ElfHdr>();
         assert!(head.is_empty(), "elf_img is not aligned");
-        elf = body.get(0).unwrap();
+        elf = body.first().unwrap();
     }
     if elf.e_ident[elf::EI_MAG0] != elf::ELFMAG0
         || elf.e_ident[elf::EI_MAG1] != elf::ELFMAG1
@@ -542,7 +548,7 @@ pub fn user_init(initcode: &'static [u8]) {
         unsafe {
             let (head, body, _) = initcode[off..(off + size_of::<ProgHdr>())].align_to::<ProgHdr>();
             assert!(head.is_empty(), "elf prong header is not aligned");
-            phdr = *body.get(0).unwrap();
+            phdr = *body.first().unwrap();
         }
         if phdr.p_type != elf::PT_LOAD || phdr.p_fsize == 0 {
             continue;
@@ -550,7 +556,7 @@ pub fn user_init(initcode: &'static [u8]) {
         if phdr.p_msize < phdr.p_fsize {
             panic!("p_msize >= p_fsize");
         }
-        if phdr.p_vaddr + phdr.p_msize < phdr.p_msize {
+        if phdr.p_vaddr.checked_add(phdr.p_msize).is_none() {
             panic!("p_vaddr + p_msize < p_msize");
         }
         let va = UVAddr::from(phdr.p_vaddr);
@@ -590,6 +596,12 @@ impl ProcInner {
             xstate: 0,
             pid: PId(0),
         }
+    }
+}
+
+impl Default for ProcInner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

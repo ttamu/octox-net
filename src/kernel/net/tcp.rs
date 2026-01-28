@@ -675,13 +675,12 @@ impl<'a> SegmentProcessor<'a> {
             return false;
         }
 
-        if self.seg.has_ack() {
-            if Self::seq_le(self.seg.ack, self.sock.iss)
-                || Self::seq_lt(self.sock.snd_nxt, self.seg.ack)
-            {
-                self.send_rst_for_segment(true);
-                return true;
-            }
+        if self.seg.has_ack()
+            && (Self::seq_le(self.seg.ack, self.sock.iss)
+                || Self::seq_lt(self.sock.snd_nxt, self.seg.ack))
+        {
+            self.send_rst_for_segment(true);
+            return true;
         }
 
         let acceptable_ack = self.seg.has_ack()
@@ -937,6 +936,40 @@ impl<'a> SegmentProcessor<'a> {
     }
 }
 
+struct SegmentMeta<'a> {
+    seq: u32,
+    ack: u32,
+    len: u32,
+    wnd: u16,
+    flags: u8,
+    payload: &'a [u8],
+}
+
+impl<'a> SegmentMeta<'a> {
+    fn new(seq: u32, ack: u32, len: u32, wnd: u16, flags: u8, payload: &'a [u8]) -> Self {
+        Self {
+            seq,
+            ack,
+            len,
+            wnd,
+            flags,
+            payload,
+        }
+    }
+
+    fn has_rst(&self) -> bool {
+        (self.flags & wire::field::FLG_RST) != 0
+    }
+
+    fn has_ack(&self) -> bool {
+        (self.flags & wire::field::FLG_ACK) != 0
+    }
+
+    fn has_syn(&self) -> bool {
+        (self.flags & wire::field::FLG_SYN) != 0
+    }
+}
+
 pub struct Tcp {
     sockets: Mutex<SocketSet<Socket>>,
     next_ephemeral_port: AtomicU16,
@@ -1019,10 +1052,7 @@ impl Tcp {
             packet.flags()
         );
 
-        let seg_seq = packet.seq_number();
-        let seg_ack = packet.ack_number();
         let flags = packet.flags();
-        let seg_wnd = packet.window_len();
         let payload = packet.payload();
 
         let mut seg_len = payload.len() as u32;
@@ -1032,6 +1062,15 @@ impl Tcp {
         if (flags & wire::field::FLG_FIN) != 0 {
             seg_len += 1;
         }
+
+        let seg = SegmentMeta::new(
+            packet.seq_number(),
+            packet.ack_number(),
+            seg_len,
+            packet.window_len(),
+            flags,
+            payload,
+        );
 
         let local = IpEndpoint::new(dst_ip, packet.dst_port());
         let foreign = IpEndpoint::new(src_ip, packet.src_port());
@@ -1043,32 +1082,11 @@ impl Tcp {
             let (established_idx, listen_idx) = self.find_sockets(&sockets, &local, &foreign);
 
             if let Some(index) = established_idx {
-                self.handle_on_socket(
-                    &mut sockets,
-                    index,
-                    seg_seq,
-                    seg_ack,
-                    seg_len,
-                    seg_wnd,
-                    flags,
-                    payload,
-                    &mut sends,
-                );
+                self.handle_on_socket(&mut sockets, index, &seg, &mut sends);
             } else if let Some(index) = listen_idx {
-                self.handle_on_listen(
-                    &mut sockets,
-                    index,
-                    &local,
-                    &foreign,
-                    seg_seq,
-                    seg_len,
-                    flags,
-                    &mut sends,
-                )?;
+                self.handle_on_listen(&mut sockets, index, &local, &foreign, &seg, &mut sends)?;
             } else {
-                self.send_rst_response(
-                    &local, &foreign, seg_seq, seg_ack, seg_len, flags, &mut sends,
-                );
+                self.send_rst_response(&local, &foreign, &seg, &mut sends);
             }
         }
 
@@ -1102,7 +1120,7 @@ impl Tcp {
 
     fn next_ephemeral_port(&self) -> u16 {
         let mut port = self.next_ephemeral_port.fetch_add(1, Ordering::Relaxed);
-        if port < Self::EPHEMERAL_PORT_MIN || port > Self::EPHEMERAL_PORT_MAX {
+        if !(Self::EPHEMERAL_PORT_MIN..=Self::EPHEMERAL_PORT_MAX).contains(&port) {
             self.next_ephemeral_port
                 .store(Self::EPHEMERAL_PORT_MIN, Ordering::Relaxed);
             port = Self::EPHEMERAL_PORT_MIN;
@@ -1136,16 +1154,11 @@ impl Tcp {
         &self,
         sockets: &mut SocketSet<Socket>,
         index: usize,
-        seg_seq: u32,
-        seg_ack: u32,
-        seg_len: u32,
-        seg_wnd: u16,
-        flags: u8,
-        payload: &[u8],
+        seg: &SegmentMeta<'_>,
         sends: &mut Vec<SendRequest>,
     ) {
         let socket = sockets.get_mut(SocketHandle::new(index)).unwrap();
-        socket.handle_segment(seg_seq, seg_ack, seg_len, seg_wnd, flags, payload);
+        socket.handle_segment(seg.seq, seg.ack, seg.len, seg.wnd, seg.flags, seg.payload);
         socket.drain_pending(sends);
 
         if socket.accept_ready {
@@ -1163,18 +1176,16 @@ impl Tcp {
         listen_index: usize,
         local: &IpEndpoint,
         foreign: &IpEndpoint,
-        seg_seq: u32,
-        _seg_len: u32,
-        flags: u8,
+        seg: &SegmentMeta<'_>,
         sends: &mut Vec<SendRequest>,
     ) -> Result<()> {
-        if (flags & wire::field::FLG_RST) != 0 {
+        if seg.has_rst() {
             return Ok(());
         }
 
-        if (flags & wire::field::FLG_ACK) != 0 {
+        if seg.has_ack() {
             sends.push(SendRequest {
-                seq: seg_seq,
+                seq: seg.seq,
                 ack: 0,
                 flags: wire::field::FLG_RST,
                 wnd: 0,
@@ -1185,14 +1196,14 @@ impl Tcp {
             return Ok(());
         }
 
-        if (flags & wire::field::FLG_SYN) != 0 {
+        if seg.has_syn() {
             let mut child = Socket::new(Socket::RX_BUFFER_SIZE, Socket::TX_BUFFER_SIZE);
             child.parent = Some(listen_index);
             child.local = *local;
             child.foreign = *foreign;
             child.rcv_wnd = child.rx_capacity as u16;
-            child.rcv_nxt = seg_seq.wrapping_add(1);
-            child.irs = seg_seq;
+            child.rcv_nxt = seg.seq.wrapping_add(1);
+            child.irs = seg.seq;
             child.iss = initial_iss(local.port);
             child.snd_una = child.iss;
             child.snd_nxt = child.iss + 1;
@@ -1211,20 +1222,17 @@ impl Tcp {
         &self,
         local: &IpEndpoint,
         foreign: &IpEndpoint,
-        seg_seq: u32,
-        seg_ack: u32,
-        seg_len: u32,
-        flags: u8,
+        seg: &SegmentMeta<'_>,
         sends: &mut Vec<SendRequest>,
     ) {
-        if (flags & wire::field::FLG_RST) != 0 {
+        if seg.has_rst() {
             return;
         }
 
-        if (flags & wire::field::FLG_ACK) == 0 {
+        if !seg.has_ack() {
             sends.push(SendRequest {
                 seq: 0,
-                ack: seg_seq.wrapping_add(seg_len),
+                ack: seg.seq.wrapping_add(seg.len),
                 flags: wire::field::FLG_RST | wire::field::FLG_ACK,
                 wnd: 0,
                 payload: Vec::new(),
@@ -1233,7 +1241,7 @@ impl Tcp {
             });
         } else {
             sends.push(SendRequest {
-                seq: seg_ack,
+                seq: seg.ack,
                 ack: 0,
                 flags: wire::field::FLG_RST,
                 wnd: 0,

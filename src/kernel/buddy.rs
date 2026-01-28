@@ -105,7 +105,7 @@ impl BuddyAllocator {
 
     fn blk_index_next(&self, k: usize, p: usize) -> usize {
         let mut n = (p - self.base) / Self::blk_size(k);
-        if (p - self.base) % Self::blk_size(k) != 0 {
+        if !(p - self.base).is_multiple_of(Self::blk_size(k)) {
             n += 1;
         }
         n
@@ -149,10 +149,7 @@ impl BuddyAllocator {
             }
 
             // Found a block; pop it and potentially split it.
-            let p = match unsafe { sizes[k].free.pop() } {
-                Some(raw_addr) => raw_addr,
-                None => return None,
-            };
+            let p = unsafe { sizes[k].free.pop() }?;
             sizes[k].alloc.bit_set(self.blk_index(k, p), true);
             while k > fk {
                 // split a block at size k and mark one half allocated at size k-1
@@ -196,7 +193,7 @@ impl BuddyAllocator {
             let sizes = unsafe { sizes_ptr.as_mut() };
             for k in self.size(p)..self.max_size() {
                 let bi = self.blk_index(k, p);
-                let buddy = if bi % 2 == 0 { bi + 1 } else { bi - 1 };
+                let buddy = if bi.is_multiple_of(2) { bi + 1 } else { bi - 1 };
                 sizes[k].alloc.bit_set(bi, false); // free p at size k
                 if sizes[k].alloc.bit_isset(buddy) {
                     // is buddy allocated?
@@ -205,7 +202,7 @@ impl BuddyAllocator {
                 // buddy is free; merge with buddy
                 q = self.addr(k, buddy);
                 unsafe { List::remove(q as *mut List) } // remove buddy from free list
-                if buddy % 2 == 0 {
+                if buddy.is_multiple_of(2) {
                     p = q;
                 }
                 // at size k + 1, mark that the merged buddy pair isn't split
@@ -243,7 +240,7 @@ impl BuddyAllocator {
     // If a block is marked as allocated and buddy is free, put the
     // buddy on the free list at size k.
     fn initfree_pair(&mut self, k: usize, bi: usize) -> usize {
-        let buddy = if bi % 2 == 0 { bi + 1 } else { bi - 1 };
+        let buddy = if bi.is_multiple_of(2) { bi + 1 } else { bi - 1 };
         if let Some(mut sizes_ptr) = self.sizes {
             let sizes = unsafe { sizes_ptr.as_mut() };
 
@@ -369,6 +366,12 @@ impl BuddyAllocator {
 
         self.initialized = true;
         Ok(())
+    }
+}
+
+impl Default for BuddyAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -87,7 +87,7 @@ where
     fn into_usize(self) -> usize;
 
     fn is_aligned(&self) -> bool {
-        self.get() % PGSIZE == 0
+        self.get().is_multiple_of(PGSIZE)
     }
     fn roundup(&mut self) {
         *self.get_mut() = (*self.get() + PGSIZE - 1) & !(PGSIZE - 1);

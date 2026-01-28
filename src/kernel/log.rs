@@ -72,7 +72,7 @@ impl Log {
     // Read the log header from disk into in-memory log header
     fn read_head(&mut self) {
         let buf = BCACHE.read(self.dev, self.start);
-        let lh = buf.align_to::<LogHeader>().get(0).unwrap();
+        let lh = buf.align_to::<LogHeader>().first().unwrap();
         self.lh = *lh;
     }
 

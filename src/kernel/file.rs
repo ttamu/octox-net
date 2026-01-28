@@ -386,18 +386,21 @@ impl DevSW {
     }
 }
 
+#[cfg(all(target_os = "none", feature = "kernel"))]
+impl Default for DevSW {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Device Major Number
 #[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Major {
     Null = 0,
     Console = 1,
+    #[default]
     Invalid,
-}
-impl Default for Major {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 impl Major {

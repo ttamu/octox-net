@@ -104,10 +104,10 @@ pub fn exec(
                 if phdr.p_msize < phdr.p_fsize {
                     return Err(ExecFileFormatError);
                 }
-                if phdr.p_vaddr + phdr.p_msize < phdr.p_msize {
+                if phdr.p_vaddr.checked_add(phdr.p_msize).is_none() {
                     return Err(ExecFileFormatError);
                 }
-                if phdr.p_vaddr % PGSIZE != 0 {
+                if !phdr.p_vaddr.is_multiple_of(PGSIZE) {
                     return Err(ExecFileFormatError);
                 }
                 sz = uvm.as_mut().unwrap().alloc(
@@ -167,29 +167,22 @@ pub fn exec(
             *ustack.get_mut(argc * 2 + 1).ok_or(ArgumentListTooLong)? = arg.len();
             argc += 1;
         }
-        let mut envc = 0;
-        for env in envp.into_iter() {
-            match env {
-                Some(env_str) => {
-                    sp -= env_str.len();
-                    sp -= sp.into_usize() % 16; // riscv sp must be 16-byte aligned
-                    if sp < stackbase {
-                        return Err(NoBufferSpace);
-                    }
-                    // copyout str to sp
-                    uvm.as_mut().unwrap().copyout(sp, env_str.as_str())?;
-                    // now sp = *const str
-                    // make &str from sp and len, and store it in ustack[].
-                    *ustack
-                        .get_mut((argc + envc) * 2)
-                        .ok_or(ArgumentListTooLong)? = sp.into_usize();
-                    *ustack
-                        .get_mut((argc + envc) * 2 + 1)
-                        .ok_or(ArgumentListTooLong)? = env_str.len();
-                    envc += 1;
-                }
-                None => {}
+        for (envc, env_str) in envp.into_iter().flatten().enumerate() {
+            sp -= env_str.len();
+            sp -= sp.into_usize() % 16; // riscv sp must be 16-byte aligned
+            if sp < stackbase {
+                return Err(NoBufferSpace);
             }
+            // copyout str to sp
+            uvm.as_mut().unwrap().copyout(sp, env_str.as_str())?;
+            // now sp = *const str
+            // make &str from sp and len, and store it in ustack[].
+            *ustack
+                .get_mut((argc + envc) * 2)
+                .ok_or(ArgumentListTooLong)? = sp.into_usize();
+            *ustack
+                .get_mut((argc + envc) * 2 + 1)
+                .ok_or(ArgumentListTooLong)? = env_str.len();
         }
         // now &ustack = &[Option<&str>]
 

@@ -60,6 +60,17 @@ pub struct NetDeviceOps {
     pub close: fn(&mut NetDevice) -> Result<()>,
 }
 
+pub struct NetDeviceConfig<'a> {
+    pub name: &'a str,
+    pub dev_type: NetDeviceType,
+    pub mtu: u16,
+    pub flags: NetDeviceFlags,
+    pub header_len: u16,
+    pub addr_len: u16,
+    pub hw_addr: MacAddr,
+    pub ops: NetDeviceOps,
+}
+
 pub struct NetDevice {
     name: [u8; 16],
     pub dev_type: NetDeviceType,
@@ -72,29 +83,20 @@ pub struct NetDevice {
     pub interfaces: Vec<NetInterface>,
 }
 impl NetDevice {
-    pub fn new(
-        name: &str,
-        dev_type: NetDeviceType,
-        mtu: u16,
-        flags: NetDeviceFlags,
-        header_len: u16,
-        addr_len: u16,
-        hw_addr: MacAddr,
-        ops: NetDeviceOps,
-    ) -> Self {
+    pub fn new(config: NetDeviceConfig<'_>) -> Self {
         let mut name_buf = [0u8; 16];
-        let bytes = name.as_bytes();
+        let bytes = config.name.as_bytes();
         let len = bytes.len().min(15);
         name_buf[..len].copy_from_slice(&bytes[..len]);
         NetDevice {
             name: name_buf,
-            dev_type,
-            mtu,
-            flags,
-            header_len,
-            addr_len,
-            hw_addr,
-            ops,
+            dev_type: config.dev_type,
+            mtu: config.mtu,
+            flags: config.flags,
+            header_len: config.header_len,
+            addr_len: config.addr_len,
+            hw_addr: config.hw_addr,
+            ops: config.ops,
             interfaces: Vec::new(),
         }
     }

@@ -167,7 +167,7 @@ pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
 
         let next_hop = route.gateway.unwrap_or(dst);
         let mac = crate::net::arp::resolve(dev.name(), next_hop, src, crate::param::TICK_HZ)
-            .or_else(|_| Err(Error::Timeout))?;
+            .map_err(|_| Error::Timeout)?;
         let mut dev_clone = dev.clone();
         let total_len = core::mem::size_of::<super::ip::IpHeader>() + payload.len();
         let mut ip_packet = alloc::vec![0u8; total_len];
@@ -201,7 +201,7 @@ pub fn output_route(dst: IpAddr, protocol: u8, payload: &[u8]) -> Result<()> {
 
 pub fn ip_init() {
     crate::println!("[net] IP layer init");
-    net_protocol_register(ProtocolType::IP, |dev, data| input(dev, data));
+    net_protocol_register(ProtocolType::IP, input);
 }
 
 pub fn parse_ip_str(s: &str) -> Result<IpAddr> {

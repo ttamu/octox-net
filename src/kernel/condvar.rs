@@ -14,3 +14,9 @@ impl Condvar {
         proc::wakeup(self as *const _ as usize);
     }
 }
+
+impl Default for Condvar {
+    fn default() -> Self {
+        Self::new()
+    }
+}

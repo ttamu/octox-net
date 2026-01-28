@@ -5,7 +5,10 @@ use crate::{
     error::{Error, Result},
     memlayout::VIRTIO1,
     net::{
-        device::{net_device_register, NetDevice, NetDeviceFlags, NetDeviceOps, NetDeviceType},
+        device::{
+            net_device_register, NetDevice, NetDeviceConfig, NetDeviceFlags, NetDeviceOps,
+            NetDeviceType,
+        },
         ethernet,
         ip::IpAddr,
     },
@@ -282,8 +285,8 @@ impl VirtioNet {
 
     fn transmit(&mut self, data: &[u8]) -> Result<()> {
         let mut idxs = [0usize; 2];
-        for i in 0..2 {
-            idxs[i] = self.alloc_desc_tx().ok_or(Error::NoBufferSpace)?;
+        for slot in &mut idxs {
+            *slot = self.alloc_desc_tx().ok_or(Error::NoBufferSpace)?;
         }
         self.desc_tx[idxs[0]].addr = &self.tx_hdr as *const _ as u64;
         self.desc_tx[idxs[0]].len = VIRTIO_NET_HDR_LEN as u32;
@@ -364,7 +367,7 @@ pub fn init() -> Result<()> {
     guard.mmio_init()?;
 
     let ops = NetDeviceOps {
-        transmit: transmit,
+        transmit,
         open: |dev| {
             dev.set_flags(dev.flags() | NetDeviceFlags::UP | NetDeviceFlags::RUNNING);
             Ok(())
@@ -375,16 +378,16 @@ pub fn init() -> Result<()> {
         },
     };
 
-    let mut dev = NetDevice::new(
-        "eth0",
-        NetDeviceType::Ethernet,
-        1500,
-        NetDeviceFlags::BROADCAST,
-        ethernet::EthHeader::LEN as u16,
-        6,
-        crate::net::ethernet::MacAddr(guard.mac),
+    let mut dev = NetDevice::new(NetDeviceConfig {
+        name: "eth0",
+        dev_type: NetDeviceType::Ethernet,
+        mtu: 1500,
+        flags: NetDeviceFlags::BROADCAST,
+        header_len: ethernet::EthHeader::LEN as u16,
+        addr_len: 6,
+        hw_addr: crate::net::ethernet::MacAddr(guard.mac),
         ops,
-    );
+    });
     dev.open()?;
     net_device_register(dev)?;
     crate::println!("[net] virtio-net initialized MAC {:02x?}", guard.mac);
@@ -414,7 +417,7 @@ fn transmit(_dev: &mut NetDevice, data: &[u8]) -> Result<()> {
 pub fn poll_rx() {
     let mut guard = NET.lock();
     if let Ok(pkts) = guard.handle_used() {
-        if pkts.len() > 0 {
+        if !pkts.is_empty() {
             crate::trace!(
                 DRIVER,
                 "[virtio-net] poll_rx: received {} packets",

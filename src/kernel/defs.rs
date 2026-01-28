@@ -37,16 +37,24 @@ pub union _transmuter<T, const N: usize> {
 #[macro_export]
 macro_rules! array {
     [$e:expr; $count:expr] => {
-        unsafe {
+        {
             use $crate::defs::{ManuallyDrop, MaybeUninit, _transmuter};
 
-            let mut arr_in: [MaybeUninit<_>; $count] = MaybeUninit::uninit().assume_init();
+            let mut arr_in: [MaybeUninit<_>; $count] =
+                unsafe { MaybeUninit::uninit().assume_init() };
             let mut idx = 0;
             while idx < $count {
                 arr_in[idx] = MaybeUninit::new($e);
                 idx += 1;
             }
-            ManuallyDrop::into_inner(_transmuter { arr_in: ManuallyDrop::new(arr_in) }.arr_out)
+            unsafe {
+                ManuallyDrop::into_inner(
+                    _transmuter {
+                        arr_in: ManuallyDrop::new(arr_in),
+                    }
+                    .arr_out,
+                )
+            }
         }
     };
 }

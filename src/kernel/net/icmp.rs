@@ -205,16 +205,14 @@ pub fn notify_reply(
 pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
     let start = *crate::trap::TICKS.lock();
     let tick_ms = crate::param::TICK_MS as u64;
-    let timeout_ticks = (timeout_ms + tick_ms - 1) / tick_ms;
+    let timeout_ticks = timeout_ms.div_ceil(tick_ms);
     loop {
         crate::net::driver::virtio_net::poll_rx();
         if let Some(reply) = {
             let mut q = ICMP_REPLY_QUEUE.lock();
-            if let Some(pos) = q.iter().position(|r| r.id == id) {
-                Some(q.remove(pos).unwrap())
-            } else {
-                None
-            }
+            q.iter()
+                .position(|r| r.id == id)
+                .map(|pos| q.remove(pos).unwrap())
         } {
             return Ok(reply);
         }

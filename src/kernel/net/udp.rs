@@ -141,7 +141,7 @@ pub fn bind(index: usize, mut local: UdpEndpoint) -> Result<()> {
         for _ in 0..(UDP_SOURCE_PORT_MAX - UDP_SOURCE_PORT_MIN + 1) {
             let port = *next_port;
             *next_port += 1;
-            if *next_port > UDP_SOURCE_PORT_MAX {
+            if *next_port < UDP_SOURCE_PORT_MIN {
                 *next_port = UDP_SOURCE_PORT_MIN;
             }
 

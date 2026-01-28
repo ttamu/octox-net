@@ -28,13 +28,12 @@ pub fn lookup(dst: IpAddr) -> Option<Route> {
     let routes = ROUTES.lock();
     let mut best: Option<Route> = None;
     for r in routes.iter().flatten() {
-        if (dst.0 & r.mask.0) == (r.dest.0 & r.mask.0) {
-            if best
+        if (dst.0 & r.mask.0) == (r.dest.0 & r.mask.0)
+            && best
                 .map(|b| mask_len(r.mask) > mask_len(b.mask))
                 .unwrap_or(true)
-            {
-                best = Some(*r);
-            }
+        {
+            best = Some(*r);
         }
     }
     best

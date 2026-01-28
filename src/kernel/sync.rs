@@ -140,6 +140,12 @@ impl<T> OnceLock<T> {
     }
 }
 
+impl<T> Default for OnceLock<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Drop for OnceLock<T> {
     fn drop(&mut self) {
         if self.is_initialized() {

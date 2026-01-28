@@ -107,7 +107,7 @@ impl SuperBlock {
     #[cfg(all(target_os = "none", feature = "kernel"))]
     fn read(dev: u32) -> Self {
         let bp = BCACHE.read(dev, 1);
-        *bp.align_to::<SuperBlock>().get(0).unwrap()
+        *bp.align_to::<SuperBlock>().first().unwrap()
     }
 
     // Block containing inode i
