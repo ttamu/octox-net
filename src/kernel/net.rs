@@ -19,8 +19,8 @@ pub fn init() {
 
     ip::ip_init();
 
-    driver::loopback::loopback_init().expect("loopback init failed");
-    driver::loopback::loopback_setup().expect("loopback setup failed");
+    driver::loopback::init().expect("loopback init failed");
+    driver::loopback::setup_iface().expect("loopback setup failed");
 
     driver::virtio_net::init().expect("virtio-net init failed");
     driver::virtio_net::setup_iface().expect("virtio-net iface failed");

@@ -30,7 +30,7 @@ fn loopback_close(dev: &mut NetDevice) -> Result<()> {
     Ok(())
 }
 
-pub fn loopback_init() -> Result<()> {
+pub fn init() -> Result<()> {
     let ops = NetDeviceOps {
         transmit: loopback_transmit,
         open: loopback_open,
@@ -53,7 +53,7 @@ pub fn loopback_init() -> Result<()> {
     Ok(())
 }
 
-pub fn loopback_setup() -> Result<()> {
+pub fn setup_iface() -> Result<()> {
     net_device_with_mut("lo", |dev| {
         let iface = NetInterface::new(IpAddr::LOOPBACK, IpAddr::new(255, 0, 0, 0));
         dev.add_interface(iface);
