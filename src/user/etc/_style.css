@@ -1,0 +1,125 @@
+:root {
+    --bg-color: #000000;
+    --text-color: #d0d0d0;
+    --dim-text: #666666;
+    --border-color: #d0d0d0;
+    --font-family: "Menlo", "Consolas", "Courier New", monospace;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-family);
+    margin: 0;
+    padding: 2rem;
+    line-height: 1.6;
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    width: 100%;
+    max-width: 800px;
+    border: 2px solid var(--border-color);
+    box-shadow: none;
+    padding: 2.5rem;
+    position: relative;
+    background-color: #000000;
+}
+
+.container::before {
+    content: "root@octox-net: ~/public_html";
+    position: absolute;
+    top: -0.8rem;
+    left: 1.5rem;
+    background: var(--bg-color);
+    color: var(--text-color);
+    padding: 0 0.8rem;
+    font-weight: bold;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+}
+
+header {
+    margin-bottom: 2.5rem;
+    border-bottom: 1px dashed var(--dim-text);
+    padding-bottom: 1.5rem;
+}
+
+h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.8rem 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: normal;
+}
+
+h1::before {
+    content: "> ";
+    color: var(--dim-text);
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    color: var(--dim-text);
+    margin-top: 0;
+}
+
+.card {
+    background: transparent;
+    padding: 0;
+    margin-bottom: 2rem;
+}
+
+h2 {
+    font-size: 1.4rem;
+    border-bottom: 1px solid var(--dim-text);
+    padding-bottom: 0.5rem;
+    margin-top: 2rem;
+    color: var(--text-color);
+}
+
+p {
+    margin-bottom: 1.5rem;
+}
+
+a {
+    color: var(--bg-color);
+    background-color: var(--text-color);
+    text-decoration: none;
+    padding: 2px 6px;
+    font-weight: bold;
+    display: inline-block;
+    transition: all 0.1s;
+}
+
+a:hover {
+    background-color: transparent;
+    color: var(--text-color);
+    outline: 2px solid var(--text-color);
+    cursor: pointer;
+    box-shadow: 0 0 8px var(--text-color);
+}
+
+ul {
+    list-style-type: none;
+    padding-left: 1rem;
+}
+
+li::before {
+    content: ">";
+    color: var(--dim-text);
+    margin-right: 0.5rem;
+}
+
+footer {
+    margin-top: 4rem;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    text-align: center;
+    border-top: 1px dashed var(--dim-text);
+    padding-top: 1rem;
+}

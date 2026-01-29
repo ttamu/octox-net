@@ -1,8 +1,40 @@
-<html>
+<!DOCTYPE html>
+<html lang="ja">
+
 <head>
-    <title>octox-net http server</title>
+    <meta charset="UTF-8">
+    <title>octox-net</title>
+    <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-    <h1>Hello from octox-net!</h1>
+    <div class="container">
+        <header>
+            <h1>Welcome to octox-net!</h1>
+            <p class="subtitle">自作OS・TCP/IP・Rust</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <p>
+                    このページは
+                    <strong><a href="https://github.com/ttamu/octox-net" target="_blank">octox-net</a></strong>
+                    上で動作する自作のHTTPサーバーから配信されています。
+                </p>
+
+                <p>
+                    octox-netは、Unix-likeなOSである
+                    <strong><a href="https://github.com/o8vm/octox" target="_blank">octox</a></strong>
+                    にRustでTCP/IPプロトコルスタックを実装したOSです。
+                </p>
+
+                <p>その他:
+                    <a href="info.json">JSON</a> /
+                    <a href="note.txt">TEXT</a>
+                </p>
+            </section>
+        </main>
+    </div>
 </body>
+
 </html>
