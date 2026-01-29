@@ -1,16 +1,14 @@
 use super::{
-    ip::{egress, IpAddr, IpHeader},
+    ip::{egress_route, IpAddr, IpHeader},
     util::{checksum, verify_checksum, write_u16},
 };
 use crate::{
-    condvar::Condvar,
     error::{Error, Result},
-    net::{device::net_device_by_name, poll},
+    net::{socket::SocketHandle, socket::SocketSet},
     spinlock::Mutex,
     trace,
 };
 use alloc::{collections::VecDeque, vec, vec::Vec};
-use core::mem::size_of;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -19,18 +17,6 @@ pub enum IcmpType {
     DestinationUnreachable = 3,
     EchoRequest = 8,
     TimeExceeded = 11,
-}
-
-impl IcmpType {
-    fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::EchoReply),
-            3 => Some(Self::DestinationUnreachable),
-            8 => Some(Self::EchoRequest),
-            11 => Some(Self::TimeExceeded),
-            _ => None,
-        }
-    }
 }
 
 mod wire {
@@ -65,6 +51,7 @@ mod wire {
             self.buffer[field::MSG_TYPE.start]
         }
 
+        #[allow(dead_code)]
         pub fn code(&self) -> u8 {
             self.buffer[field::CODE.start]
         }
@@ -118,48 +105,94 @@ mod wire {
     }
 }
 
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-pub struct IcmpEcho {
-    pub msg_type: u8,
-    pub code: u8,
-    pub checksum: u16,
-    pub id: u16,
-    pub seq: u16,
-}
-impl IcmpEcho {
-    pub const HEADER_SIZE: usize = size_of::<Self>();
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IcmpReplyKind {
-    Echo,
-    Unreachable(u8),
-}
-
 #[derive(Debug, Clone)]
-pub struct IcmpReply {
-    pub src: IpAddr,
-    pub id: u16,
-    pub seq: u16,
-    pub payload: Vec<u8>,
-    pub kind: IcmpReplyKind,
-    pub timestamp: usize,
+struct RawPacket {
+    src: IpAddr,
+    data: Vec<u8>,
 }
 
-use super::ip;
-
-struct IcmpCore {
-    replies: Mutex<VecDeque<IcmpReply>>,
-    cv: Condvar,
+pub struct RawSocket {
+    protocol: u8,
+    recv_queue: VecDeque<RawPacket>,
 }
 
-impl IcmpCore {
+impl RawSocket {
+    const fn new(protocol: u8) -> Self {
+        Self {
+            protocol,
+            recv_queue: VecDeque::new(),
+        }
+    }
+}
+
+struct Icmp {
+    sockets: Mutex<SocketSet<RawSocket>>,
+}
+
+impl Icmp {
+    const SOCKET_CAPACITY: usize = 16;
+
     const fn new() -> Self {
         Self {
-            replies: Mutex::new(VecDeque::new(), "icmp_queue"),
-            cv: Condvar::new(),
+            sockets: Mutex::new(SocketSet::new(Self::SOCKET_CAPACITY), "icmp_sockets"),
         }
+    }
+
+    fn socket_alloc(&self) -> Result<usize> {
+        let mut sockets = self.sockets.lock();
+        let handle = sockets.alloc(RawSocket::new(IpHeader::ICMP))?;
+        Ok(handle.index())
+    }
+
+    fn socket_free(&self, index: usize) -> Result<()> {
+        let mut sockets = self.sockets.lock();
+        let handle = SocketHandle::new(index);
+        if handle.index() >= Self::SOCKET_CAPACITY {
+            return Err(Error::InvalidSocketIndex);
+        }
+        match sockets.get(handle) {
+            Ok(_) => sockets.free(handle),
+            Err(Error::InvalidSocketState) => Err(Error::InvalidSocketIndex),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn socket_sendto(&self, index: usize, dst: IpAddr, data: &[u8]) -> Result<usize> {
+        let sockets = self.sockets.lock();
+        let socket = sockets.get(SocketHandle::new(index))?;
+        let protocol = socket.protocol;
+        drop(sockets);
+
+        if data.len() < wire::field::CHECKSUM.end {
+            return Err(Error::PacketTooShort);
+        }
+
+        let mut packet = data.to_vec();
+        write_u16(&mut packet[wire::field::CHECKSUM], 0);
+        let csum = checksum(&packet);
+        write_u16(&mut packet[wire::field::CHECKSUM], csum);
+
+        trace!(
+            ICMP,
+            "[icmp] sending raw: {} bytes -> {:?}",
+            packet.len(),
+            dst.to_bytes()
+        );
+
+        egress_route(dst, protocol, &packet)?;
+        Ok(packet.len())
+    }
+
+    fn socket_recvfrom(&self, index: usize, buf: &mut [u8]) -> Result<(usize, IpAddr)> {
+        let mut sockets = self.sockets.lock();
+        let socket = sockets.get_mut(SocketHandle::new(index))?;
+        let Some(packet) = socket.recv_queue.pop_front() else {
+            return Err(Error::WouldBlock);
+        };
+
+        let len = packet.data.len().min(buf.len());
+        buf[..len].copy_from_slice(&packet.data[..len]);
+        Ok((len, packet.src))
     }
 
     fn ingress(&self, src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
@@ -168,93 +201,30 @@ impl IcmpCore {
         }
 
         let echo = wire::Echo::new_checked(data)?;
-        let id = echo.id();
-        let seq = echo.seq();
-        let payload = &data[wire::ECHO_HEADER_LEN..];
-
-        match IcmpType::from_u8(echo.msg_type()) {
-            Some(IcmpType::EchoRequest) => self.handle_echo_request(dst, src, id, seq, payload),
-            Some(IcmpType::EchoReply) => self.handle_echo_reply(src, id, seq, payload),
-            Some(IcmpType::DestinationUnreachable) => {
-                self.handle_unreachable(src, echo.code(), payload)
-            }
-            Some(IcmpType::TimeExceeded) => Err(Error::UnsupportedProtocol),
-            None => Err(Error::UnsupportedProtocol),
-        }
-    }
-
-    fn handle_echo_request(
-        &self,
-        dst: IpAddr,
-        src: IpAddr,
-        id: u16,
-        seq: u16,
-        payload: &[u8],
-    ) -> Result<()> {
-        trace!(
-            ICMP,
-            "[icmp] Received Echo Request from {:?}, id={}, seq={}",
-            src.to_bytes(),
-            id,
-            seq
-        );
-        self.echo_reply(dst, src, id, seq, payload)
-    }
-
-    fn handle_echo_reply(&self, src: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-        trace!(
-            ICMP,
-            "[icmp] Received Echo Reply from {:?}, id={}, seq={}",
-            src.to_bytes(),
-            id,
-            seq
-        );
-        self.notify_reply(src, id, seq, payload, IcmpReplyKind::Echo)
-    }
-
-    fn handle_unreachable(&self, src: IpAddr, code: u8, payload: &[u8]) -> Result<()> {
-        let (orig_id, orig_seq) = self.parse_unreachable(payload)?;
-        trace!(
-            ICMP,
-            "[icmp] Destination Unreachable code={} for id={}, seq={}",
-            code,
-            orig_id,
-            orig_seq
-        );
-        self.notify_reply(
-            src,
-            orig_id,
-            orig_seq,
-            payload,
-            IcmpReplyKind::Unreachable(code),
-        )
-    }
-
-    fn parse_unreachable(&self, payload: &[u8]) -> Result<(u16, u16)> {
-        if payload.len() < 28 {
-            return Err(Error::PacketTooShort);
+        if echo.msg_type() == IcmpType::EchoRequest as u8 {
+            let id = echo.id();
+            let seq = echo.seq();
+            let payload = &data[wire::ECHO_HEADER_LEN..];
+            self.echo_reply(dst, src, id, seq, payload)?;
         }
 
-        let inner_ip_hdr = &payload[..20];
-        let inner_protocol = inner_ip_hdr[9];
+        self.enqueue_to_all(src, data);
+        Ok(())
+    }
 
-        if inner_protocol != IpHeader::ICMP {
-            return Err(Error::UnsupportedProtocol);
+    fn enqueue_to_all(&self, src: IpAddr, data: &[u8]) {
+        let mut sockets = self.sockets.lock();
+        for (_, socket) in sockets.iter_mut() {
+            socket.recv_queue.push_back(RawPacket {
+                src,
+                data: data.to_vec(),
+            });
         }
-
-        let inner_icmp = &payload[20..];
-        if inner_icmp.len() < wire::ECHO_HEADER_LEN {
-            return Err(Error::UnsupportedProtocol);
-        }
-
-        let orig_id = u16::from_be_bytes([inner_icmp[4], inner_icmp[5]]);
-        let orig_seq = u16::from_be_bytes([inner_icmp[6], inner_icmp[7]]);
-        Ok((orig_id, orig_seq))
     }
 
     fn echo_reply(
         &self,
-        src: IpAddr,
+        _src: IpAddr,
         dst: IpAddr,
         id: u16,
         seq: u16,
@@ -283,120 +253,81 @@ impl IcmpCore {
             seq
         );
 
-        let dev = net_device_by_name("lo").ok_or(Error::DeviceNotFound)?;
-        egress(&dev, IpHeader::ICMP, src, dst, &packet)
-    }
-
-    fn echo_request(&self, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-        let total_len = wire::ECHO_HEADER_LEN + payload.len();
-        let mut packet = vec![0u8; total_len];
-        {
-            let mut echo = wire::EchoMut::new_unchecked(&mut packet);
-            echo.set_msg_type(IcmpType::EchoRequest as u8);
-            echo.set_code(0);
-            echo.set_checksum(0);
-            echo.set_id(id);
-            echo.set_seq(seq);
-            echo.payload_mut().copy_from_slice(payload);
-        }
-        let csum = checksum(&packet);
-        write_u16(&mut packet[2..4], csum);
-
-        trace!(
-            ICMP,
-            "[icmp] Sending Echo Request to {:?}, id={}, seq={}",
-            dst.to_bytes(),
-            id,
-            seq
-        );
-
-        ip::egress_route(dst, IpHeader::ICMP, &packet)
-    }
-
-    fn notify_reply(
-        &self,
-        src: IpAddr,
-        id: u16,
-        seq: u16,
-        payload: &[u8],
-        kind: IcmpReplyKind,
-    ) -> Result<()> {
-        {
-            let mut q = self.replies.lock();
-            let now = *crate::trap::TICKS.lock();
-            q.push_back(IcmpReply {
-                src,
-                id,
-                seq,
-                payload: payload.to_vec(),
-                kind,
-                timestamp: now,
-            });
-        }
-        self.cv.notify_all();
-        Ok(())
-    }
-
-    fn recv_reply(&self, id: u16, timeout_ms: u64) -> Result<IcmpReply> {
-        let start = *crate::trap::TICKS.lock();
-        let tick_ms = crate::param::TICK_MS as u64;
-        let timeout_ticks = timeout_ms.div_ceil(tick_ms);
-        loop {
-            poll();
-            if let Some(reply) = {
-                let mut q = self.replies.lock();
-                q.iter()
-                    .position(|r| r.id == id)
-                    .map(|pos| q.remove(pos).unwrap())
-            } {
-                return Ok(reply);
-            }
-            let elapsed = *crate::trap::TICKS.lock() - start;
-            if (elapsed as u64) >= timeout_ticks {
-                return Err(Error::Timeout);
-            }
-            crate::proc::yielding();
-        }
+        egress_route(dst, IpHeader::ICMP, &packet)
     }
 }
 
-static ICMP: IcmpCore = IcmpCore::new();
+static ICMP: Icmp = Icmp::new();
+
+pub fn socket_alloc() -> Result<usize> {
+    ICMP.socket_alloc()
+}
+
+pub fn socket_free(index: usize) -> Result<()> {
+    ICMP.socket_free(index)
+}
+
+pub fn socket_sendto(index: usize, dst: IpAddr, data: &[u8]) -> Result<usize> {
+    ICMP.socket_sendto(index, dst, data)
+}
+
+pub fn socket_recvfrom(index: usize, buf: &mut [u8]) -> Result<(usize, IpAddr)> {
+    ICMP.socket_recvfrom(index, buf)
+}
 
 pub fn ingress(src: IpAddr, dst: IpAddr, data: &[u8]) -> Result<()> {
     ICMP.ingress(src, dst, data)
 }
 
-pub fn echo_reply(src: IpAddr, dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    ICMP.echo_reply(src, dst, id, seq, payload)
-}
-
-pub fn echo_request(dst: IpAddr, id: u16, seq: u16, payload: &[u8]) -> Result<()> {
-    ICMP.echo_request(dst, id, seq, payload)
-}
-
-pub fn notify_reply(
-    src: IpAddr,
-    id: u16,
-    seq: u16,
-    payload: &[u8],
-    kind: IcmpReplyKind,
-) -> Result<()> {
-    ICMP.notify_reply(src, id, seq, payload, kind)
-}
-
-pub fn recv_reply(id: u16, timeout_ms: u64) -> Result<IcmpReply> {
-    ICMP.recv_reply(id, timeout_ms)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::wire;
+    use super::{wire, Icmp, IpAddr, RawPacket, SocketHandle};
     use crate::error::Error;
+    use alloc::vec;
 
     #[test_case]
     fn echo_too_short() {
         let data = [0u8; wire::ECHO_HEADER_LEN - 1];
         let err = wire::Echo::new_checked(&data).err().unwrap();
         assert_eq!(err, Error::PacketTooShort);
+    }
+
+    #[test_case]
+    fn socket_alloc_release() {
+        let icmp = Icmp::new();
+        let idx = icmp.socket_alloc().unwrap();
+        icmp.socket_free(idx).unwrap();
+        let err = icmp.socket_free(idx).unwrap_err();
+        assert_eq!(err, Error::InvalidSocketIndex);
+    }
+
+    #[test_case]
+    fn socket_recvfrom_empty() {
+        let icmp = Icmp::new();
+        let idx = icmp.socket_alloc().unwrap();
+        let mut buf = [0u8; 8];
+        let err = icmp.socket_recvfrom(idx, &mut buf).unwrap_err();
+        assert_eq!(err, Error::WouldBlock);
+    }
+
+    #[test_case]
+    fn socket_recvfrom_packet() {
+        let icmp = Icmp::new();
+        let idx = icmp.socket_alloc().unwrap();
+        let src = IpAddr::new(192, 0, 2, 1);
+        {
+            let mut sockets = icmp.sockets.lock();
+            let socket = sockets.get_mut(SocketHandle::new(idx)).unwrap();
+            socket.recv_queue.push_back(RawPacket {
+                src,
+                data: vec![1, 2, 3, 4],
+            });
+        }
+
+        let mut buf = [0u8; 8];
+        let (len, recv_src) = icmp.socket_recvfrom(idx, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(recv_src, src);
+        assert_eq!(&buf[..len], &[1, 2, 3, 4]);
     }
 }

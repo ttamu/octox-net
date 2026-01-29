@@ -55,14 +55,20 @@ fn lang_start<T: Termination + 'static>(
     sys::exit(xstatus)
 }
 
-pub fn icmp_echo_request(dst: &str, id: u16, seq: u16, payload: &[u8]) -> sys::Result<()> {
-    sys::icmpechorequest(dst.as_bytes(), id, seq, payload)?;
-    Ok(())
+pub fn icmp_socket() -> sys::Result<usize> {
+    sys::icmpsocket()
 }
 
-pub fn icmp_recv_reply(id: u16, timeout_ms: u64, buf: &mut [u8]) -> sys::Result<usize> {
-    let n = sys::icmprecvreply(id, timeout_ms, buf)?;
-    Ok(n)
+pub fn icmp_sendto(sock: usize, dst: &str, data: &[u8]) -> sys::Result<usize> {
+    sys::icmpsendto(sock, dst.as_bytes(), data)
+}
+
+pub fn icmp_recvfrom(sock: usize, buf: &mut [u8], src_addr: &mut u32) -> sys::Result<usize> {
+    sys::icmprecvfrom(sock, buf, src_addr)
+}
+
+pub fn icmp_close(sock: usize) -> sys::Result<()> {
+    sys::icmpclose(sock)
 }
 
 pub fn dns_resolve(domain: &str) -> sys::Result<u32> {

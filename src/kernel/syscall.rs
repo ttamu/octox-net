@@ -52,17 +52,19 @@ pub enum SysCalls {
     Close = 21,
     Dup2 = 22,
     Fcntl = 23,
-    IcmpEchoRequest = 24,
-    IcmpRecvReply = 25,
-    Clocktime = 26,
-    DnsResolve = 27,
-    TcpSocket = 28,
-    TcpConnect = 29,
-    TcpListen = 30,
-    TcpSend = 31,
-    TcpRecv = 32,
-    TcpClose = 33,
-    TcpAccept = 34,
+    IcmpSocket = 24,
+    IcmpSendTo = 25,
+    IcmpRecvFrom = 26,
+    IcmpClose = 27,
+    Clocktime = 28,
+    DnsResolve = 29,
+    TcpSocket = 30,
+    TcpConnect = 31,
+    TcpListen = 32,
+    TcpSend = 33,
+    TcpRecv = 34,
+    TcpClose = 35,
+    TcpAccept = 36,
     Invalid = 0,
 }
 
@@ -116,14 +118,16 @@ impl SysCalls {
         (Fn::U(Self::close), "(fd: usize)"),               // Release open file fd.
         (Fn::I(Self::dup2), "(src: usize, dst: usize)"),   //
         (Fn::I(Self::fcntl), "(fd: usize, cmd: FcntlCmd)"), //
+        (Fn::I(Self::icmpsocket), "()"),
         (
-            Fn::I(Self::icmpechorequest),
-            "(dst: &[u8], id: u16, seq: u16, payload: &[u8])",
+            Fn::I(Self::icmpsendto),
+            "(sock: usize, dst: &[u8], data: &[u8])",
         ),
         (
-            Fn::I(Self::icmprecvreply),
-            "(id: u16, timeout_ms: u64, buf: &mut [u8])",
+            Fn::I(Self::icmprecvfrom),
+            "(sock: usize, buf: &mut [u8], src_addr: &mut u32)",
         ),
+        (Fn::U(Self::icmpclose), "(sock: usize)"),
         (Fn::I(Self::clocktime), "()"),
         (
             Fn::I(Self::dnsresolve),
@@ -714,43 +718,64 @@ impl SysCalls {
         }
     }
 
-    pub fn icmpechorequest() -> Result<usize> {
+    pub fn icmpsocket() -> Result<usize> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(0);
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            crate::net::icmp::socket_alloc()
+        }
+    }
+
+    pub fn icmpsendto() -> Result<usize> {
         #[cfg(not(all(target_os = "none", feature = "kernel")))]
         return Ok(0);
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
             use crate::net::ip::parse_ip_str;
+            let sock = argraw(0);
+
             let mut sbinfo: SBInfo = Default::default();
-            let sbinfo = SBInfo::from_arg(0, &mut sbinfo)?;
+            let sbinfo = SBInfo::from_arg(1, &mut sbinfo)?;
             let mut buf = alloc::vec![0u8; sbinfo.len];
             crate::proc::either_copyin(&mut buf[..], sbinfo.ptr.into())?;
             let s = core::str::from_utf8(&buf).or(Err(Utf8Error))?;
             let s = s.trim_end_matches(char::from(0));
             let dst = parse_ip_str(s)?;
-            let id = argraw(1) as u16;
-            let seq = argraw(2) as u16;
+
             let mut sbinfo_payload: SBInfo = Default::default();
-            let sbinfo_payload = SBInfo::from_arg(3, &mut sbinfo_payload)?;
+            let sbinfo_payload = SBInfo::from_arg(2, &mut sbinfo_payload)?;
             let mut payload = alloc::vec![0u8; sbinfo_payload.len];
             crate::proc::either_copyin(&mut payload[..], sbinfo_payload.ptr.into())?;
-            crate::net::icmp::echo_request(dst, id, seq, &payload)?;
-            Ok(0)
+            crate::net::icmp::socket_sendto(sock, dst, &payload)
         }
     }
 
-    pub fn icmprecvreply() -> Result<usize> {
+    pub fn icmprecvfrom() -> Result<usize> {
         #[cfg(not(all(target_os = "none", feature = "kernel")))]
         return Ok(0);
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
+            let sock = argraw(0);
             let mut sbinfo: SBInfo = Default::default();
-            let id = argraw(0) as u16;
-            let timeout_ms = argraw(1) as u64;
-            let sbinfo = SBInfo::from_arg(2, &mut sbinfo)?;
-            let reply = crate::net::icmp::recv_reply(id, timeout_ms)?;
-            let copy_len = core::cmp::min(reply.payload.len(), sbinfo.len);
-            crate::proc::either_copyout(sbinfo.ptr.into(), &reply.payload[..copy_len])?;
-            Ok(copy_len)
+            let sbinfo = SBInfo::from_arg(1, &mut sbinfo)?;
+            let addr_ptr: UVAddr = argraw(2).into();
+
+            let mut buf = alloc::vec![0u8; sbinfo.len];
+            let (len, src) = crate::net::icmp::socket_recvfrom(sock, &mut buf)?;
+            crate::proc::either_copyout(sbinfo.ptr.into(), &buf[..len])?;
+            crate::proc::either_copyout(addr_ptr.into(), &src.0.to_ne_bytes())?;
+            Ok(len)
+        }
+    }
+
+    pub fn icmpclose() -> Result<()> {
+        #[cfg(not(all(target_os = "none", feature = "kernel")))]
+        return Ok(());
+        #[cfg(all(target_os = "none", feature = "kernel"))]
+        {
+            let sock = argraw(0);
+            crate::net::icmp::socket_free(sock)
         }
     }
 
@@ -1016,17 +1041,19 @@ impl SysCalls {
             21 => Self::Close,
             22 => Self::Dup2,
             23 => Self::Fcntl,
-            24 => Self::IcmpEchoRequest,
-            25 => Self::IcmpRecvReply,
-            26 => Self::Clocktime,
-            27 => Self::DnsResolve,
-            28 => Self::TcpSocket,
-            29 => Self::TcpConnect,
-            30 => Self::TcpListen,
-            31 => Self::TcpSend,
-            32 => Self::TcpRecv,
-            33 => Self::TcpClose,
-            34 => Self::TcpAccept,
+            24 => Self::IcmpSocket,
+            25 => Self::IcmpSendTo,
+            26 => Self::IcmpRecvFrom,
+            27 => Self::IcmpClose,
+            28 => Self::Clocktime,
+            29 => Self::DnsResolve,
+            30 => Self::TcpSocket,
+            31 => Self::TcpConnect,
+            32 => Self::TcpListen,
+            33 => Self::TcpSend,
+            34 => Self::TcpRecv,
+            35 => Self::TcpClose,
+            36 => Self::TcpAccept,
             _ => Self::Invalid,
         }
     }
